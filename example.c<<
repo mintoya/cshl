@@ -1,0 +1,68 @@
+external fn printf(*i8,...) i32;
+
+fn exec (function fn(*i8)i32) {
+  function("world");
+}
+
+fn soa( type ) type {
+  var result = @anon{};
+  type | get fields | each {
+    result.add($.name,&$); // type of a referance to type
+  }; // all of these items will automatically be freed when
+     // this type goes out of scope 
+  return result;
+}
+
+fn ! ( t type, errors [][]u8) type {
+  return @anon{
+    t, enum(errors | prepend "fine");
+    fn try (self @this) t {
+      if(self.error.is("fine") 
+        return self.$0;
+      @panic("");
+    }
+    fn or (self @this,otherwise t) t {
+      if(self.error.is("fine") 
+        return self.1;
+      return otherwise;
+    }
+  }
+}
+
+fn strndup(str []u8)
+  @alloc{}
+  []u8
+{
+  var result =  alloc([str.len]u8) @return; // free is called in parent
+  copy(str,result);
+  return result;
+}
+fn strndup2(str []u8) // c-style 
+  @alloc{}
+  []u8
+{
+  var result =  alloc([str.len]u8) @allocator; // free when allocator is free
+  copy(str,result);
+  return result;
+}
+
+fn main(args []*[]u8) !(void) {
+
+  for(arg in args)
+   @cast(*arg,*i8) | printf($);
+
+  let str = "hello %s\0";
+  let str2  = strndup(str) @alloc{heap};
+
+  // implicit capture
+  let fun  = ($) => | printf(str,$);
+  "world" | fun;
+  let fun2 = (word *i8) @captures {str} => |{return printf(str,word);};
+  "world" | fun2;
+
+  exec(fun);
+  exec(fun2);
+  // free called on str2
+}
+
+
