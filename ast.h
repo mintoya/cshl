@@ -1,6 +1,8 @@
+#pragma once
 #include "lexer.h"
 #include "wheels/mytypes.h"
 #include "wheels/sList.h"
+#include "wheels/shmap.h"
 #include "wheels/tagged_unions.h"
 #include <stddef.h>
 
@@ -73,3 +75,4 @@ TU_DEFINE(
     astFunction,
     astKeyword,
 );
+

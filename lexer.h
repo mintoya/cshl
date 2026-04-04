@@ -1,3 +1,4 @@
+#pragma once
 #include "wheels/allocator.h"
 #include "wheels/fptr.h"
 #include "wheels/mylist.h"
@@ -16,6 +17,13 @@ typedef enum operation {
   OP_KEYOWRD,
 } operation;
 
+static fptr keywords[] = {
+    fp("return"),
+    fp("const"),
+    fp("var"),
+    fp("fn"),
+    fp("type"),
+};
 typedef enum : u8 {
   TK_ignored = 0,
   TK_alpha,
@@ -54,7 +62,7 @@ typedef struct tlocation {
   usize len;
   ptrdiff_t ptr;
 } tlocation;
-mList(tlocation) breakup(AllocatorV allocator, fptr str) {
+static mList(tlocation) breakup(AllocatorV allocator, fptr str) {
   var_ res = mList_init(allocator, tlocation);
   ptrdiff_t start = 0, i = 0;
   usize len = str.len;
