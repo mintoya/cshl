@@ -1,0 +1,43 @@
+MODULE(
+  mainmod,
+  ( 
+    INIT(i32,INT(32)),
+    INIT( i8,INT( 8)),
+    INIT(puts,BLOCK(
+    PTR(i8),,
+      (
+        INIT(i,ARG(0)),
+        INIT(putc,BLOCK(i8,,...)),
+        
+        LABEL(again),
+
+        JMP_IF(CALL(not,INDEX(i,0)) , end),
+
+        CALL(putc,INDEX(i,0)),
+        ASSIGN(i,ADD(i,1)),
+
+        JMP(again),
+
+        LABEL(end),
+        RETURN(),
+      )
+    )),
+    INIT(main,BLOCK(
+      (i32,PTR(PTR(i8))),
+      i32,
+      (
+        INIT(i,0)
+        JMP_IF(EQUAL(i,ARG(0)),end),
+        LABEL(again),
+        CALL(
+          puts,
+          ( INDEX( ARG(1),i) )
+        ),
+        ASSIGN(i,SUB(i,1)),
+        JMP(again),
+        LABEL(end),
+        RETURN(0)
+      )
+    )) ,
+  )
+)

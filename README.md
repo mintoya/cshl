@@ -1,2 +1,0 @@
-# C<<
-another c transpiler
