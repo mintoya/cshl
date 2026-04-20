@@ -1,8 +1,12 @@
 MODULE(
   mainmod,
   ( 
+    INIT(u64,UINT(64)),
     INIT(i32,INT(32)),
-    INIT( i8,INT( 8)),
+    INIT(i8 ,INT(8)),
+    INIT(array, BLOCK(TYPE,TYPE,
+      RETURN(STRUCT(u64,PTR(ARG(0))))
+    )),
     INIT(puts,BLOCK(
     PTR(i8),,
       (
