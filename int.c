@@ -4,6 +4,7 @@
 #include "wheels/print.h"
 #include "wheels/shmap.h"
 #include "wheels/tagged_unions.h"
+#include <stddef.h>
 
 //
 // types
@@ -13,23 +14,29 @@ typedef struct item_type item_type;
 
 typedef struct item_type_int {
   usize bitwidth;
+  usize alignment;
 } item_type_int;
 typedef struct item_type_type {
 } item_type_type;
 typedef struct item_type_uint {
   usize bitwidth;
+  usize alignment;
 } item_type_uint;
 typedef struct item_type_ptr {
   item_type(*type[1]); // not this one
+  usize alignment;
 } item_type_ptr;
 typedef struct item_type_struct {
   item_type *types;
+  usize alignment;
 } item_type_struct;
 typedef struct item_type_packed_struct {
   item_type *types;
+  usize alignment;
 } item_type_packed_struct;
 typedef struct item_type_union {
   item_type *types;
+  usize alignment;
 } item_type_union;
 
 typedef struct item_type_block {
@@ -45,8 +52,47 @@ TU_DEFINE(
     item_type_uint,
     item_type_struct,
     item_type_union,
+    item_type_packed_struct,
     item_type_block,
 );
+
+#pragma push_macro("max")
+#pragma push_macro("min")
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+usize type_size(item_type *t) {
+  item_type ts = *t;
+  TU_MATCH(
+      (item_type, ts),
+      (item_type_struct, {
+
+                         }),
+      (item_type_int, {
+        return max(lineup($in.bitwidth, sizeof(char) * 8), $in.alignment);
+      }),
+      (item_type_uint, {
+        return max(lineup($in.bitwidth, sizeof(char) * 8), $in.alignment);
+      }),
+      (item_type_ptr, {
+        return max(sizeof(void *) * 8, $in.alignment);
+      }),
+      (item_type_block, {
+        assertMessage(false, "size of actual function");
+      }),
+      (item_type_type, {
+        assertMessage(false, "type isnt sizeable type");
+      }),
+      (default, {
+        assertMessage(
+            false, "unhandled type : %s", snprint(stdAlloc, "{}", t->tag).ptr
+        );
+      })
+  );
+  assertMessage(false, "unreachable");
+  return 0;
+}
+#pragma pop_macro("max")
+#pragma pop_macro("min")
 
 //
 // text processing
@@ -386,8 +432,25 @@ typedef struct {
   item_type *type;
   void *place;
 } symbol;
+symbol interpret(astNode *node, bool fake) {
+  mList(AllocatorV) arenaStack = NULL; // every subsequent arena is based on
+                                       // the prior arena
+  if (!arenaStack) {
+    arenaStack = mList_init(stdAlloc, AllocatorV);
+    mList_push(arenaStack, arena_new_ext(stdAlloc, 1024));
+  }
+  switch (node->op) {
+    case builtin_NONE: { // symbol or literal
+      assertMessage(msList_len(node->args) == 0);
+      fptr f = node->text;
+    } break;
+    case builtin_MODU_GET: {
+      assertMessage(msList_len(node->args) == 2);
+    } break;
+  }
 
-symbol interpret(astNode *astnode) {}
+  return (symbol){};
+}
 
 int main(void) {
   u8 c[] =
