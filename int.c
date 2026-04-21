@@ -194,61 +194,44 @@ msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
 //
 // 'ast'
 //
+#define OPERATIONS_X                                 \
+  NONE,                                              \
+      INT,      /*signed integer (bits)*/            \
+      UINT,     /*unsigned integer(bits)*/           \
+      STRUCT,   /*struct(types)*/                    \
+      PSTRUCT,  /*packed struct(types)*/             \
+      UNION,    /*union(types)*/                     \
+      TYPE,     /*type*/                             \
+      PTR,      /*pointer to (type)*/                \
+      MODULE,   /*module(name,(members...))*/        \
+      MODU_GET, /*get sym from mod(mod,sym)*/        \
+      BLOCK,    /*(inputs,output,instructions)*/     \
+      BEGINS,   /*record custom stack pointer*/      \
+      ENDS,     /*set last custom stack pointer */   \
+      RETURN,   /*return (value)*/                   \
+      LABEL,    /*create(label)*/                    \
+      JMP,      /*jump to (label)*/                  \
+      JMP_IF,   /**/                                 \
+      CALL,     /*call (functionid,(argslist...))*/  \
+      INIT,     /*declare (sym,type?,value)*/        \
+      ASSIGN,   /*assign(sym,value)*/                \
+      ARG,      /*get nth arg (n)*/                  \
+      MOVE,     /*copy(fromptr,toptr)*/              \
+      WHERE,    /*pointer-to(sym)*/                  \
+      ADD,      /*add b to sym(b,sym)*/              \
+      SUB,      /*subtract b from sym(sym,b)*/       \
+      MUL,      /*multiply a by b,then set a (a,b)*/ \
+      DIV,      /*divide a by b , then set a (a,b)*/ \
+      MOD,      /*mod a by b , then set a (a,b)*/
 
+#define builtin_string(n) #n,
 char builtins[][8] = {
-    "",
-    // type
-    "INT",    // signed integer, bitcount arg
-    "UINT",   // unsigned version
-    "STRUCT", // turns arguments into struct
-    "UNION",
-    "TYPE",
-    "PTR",
-    // scope
-    "MODULE",
-    "BLOCK",
-    // control
-    "RETURN",
-    "JMP",
-    "LABEL",
-    "JMP_IF",
-    // values
-    "CALL",
-    "INIT",
-    "ASSIGN",
-    "ARG",
-    // math
-    "INDEX",
-    "ADD",
-    "SUB",
-    "MUL",
-    "DIV",
-
+    APPLY_N(builtin_string, OPERATIONS_X)
 };
 
+#define builtin_enum(n) builtin_##n,
 enum builtin_OP {
-  builtin_NONE,   // will cause an error
-  builtin_INT,    // signed integer, bitcount arg
-  builtin_UINT,   // unsigned version
-  builtin_STRUCT, // turns arguments into struct
-  builtin_UNION,
-  builtin_TYPE,
-  builtin_PTR,
-  builtin_MODULE,
-  builtin_BLOCK,
-  builtin_RETURN,
-  builtin_JMP,
-  builtin_LABEL,
-  builtin_JMP_IF,
-  builtin_CALL,
-  builtin_INIT,
-  builtin_ASSIGN,
-  builtin_ARG,
-  builtin_INDEX,
-  builtin_ADD,
-  builtin_SUB,
-  builtin_MUL,
-  builtin_DIV,
+  APPLY_N(builtin_enum, OPERATIONS_X)
 };
 typedef struct astNode {
   fptr text;
@@ -277,47 +260,25 @@ astNode *astNode_expand(usize op, fptr builtin, fptr text) {
   }
 
   astNode *next = aCreate(astNodes_arena, astNode);
-  switch (op) {
-    case builtin_INT:
-    case builtin_JMP:
-    case builtin_UINT:
-    case builtin_RETURN:
-    case builtin_STRUCT:
-    case builtin_UNION:
-    case builtin_TYPE:
-    case builtin_PTR:
-    case builtin_MODULE:
-    case builtin_BLOCK:
-    case builtin_LABEL:
-    case builtin_JMP_IF:
-    case builtin_CALL:
-    case builtin_INIT:
-    case builtin_ARG:
-    case builtin_INDEX:
-    case builtin_ADD:
-    case builtin_SUB:
-    case builtin_MUL:
-    case builtin_DIV:
-    case builtin_ASSIGN: {
 
-      next->op = op;
-      next->text = text;
-      next->args = msList_init(astNodes_arena, astNode *);
+  if (op > 0 && op < countof(builtins)) {
 
-    } break;
-    case builtin_NONE:
-    default: {
-      assertMessage(
-          false,
-          "unknown builtin  %s",
-          snprint(
-              stdAlloc,
-              "index: {}, name: {slice(c8)}",
-              op, builtin
-          )
-              .ptr
-      );
-    } break;
+    next->op = op;
+    next->text = text;
+    next->args = msList_init(astNodes_arena, astNode *);
+
+  } else {
+
+    assertMessage(
+        false,
+        "unknown builtin  %s",
+        snprint(
+            stdAlloc,
+            "index: {}, name: {slice(c8)}",
+            op, builtin
+        )
+            .ptr
+    );
   }
   return next;
 }
@@ -360,17 +321,25 @@ astNode *astNode_recurse(fptr call, msList(fptr) args) {
 }
 
 REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
+  args = printer_arg_trim(args);
+  bool usenumbers = false;
+
+  if (fptr_eq(args, fp("numbers")))
+    usenumbers = true;
+
   if (!in) {
     PUTS("NULL");
   } else if (in->op) {
-    USENAMEDPRINTER("cstr", (char *)builtins[in->op]);
-    // USETYPEPRINTER(usize, in->op);
+    if (usenumbers)
+      USETYPEPRINTER(usize, in->op);
+    else
+      USENAMEDPRINTER("cstr", (char *)builtins[in->op]);
     PUTS("(");
     if (in->args) {
       for (usize i = 0; i < msList_len(in->args); i++) {
         if (i > 0)
           PUTS(", ");
-        USENAMEDPRINTER("astNode", in->args[i]);
+        USENAMEDPRINTER_WA("astNode", args, in->args[i]);
       }
     }
     PUTS(")");
@@ -379,7 +348,7 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
     for (usize i = 0; i < msList_len(in->args); i++) {
       if (i > 0)
         PUTS(", ");
-      USENAMEDPRINTER("astNode", in->args[i]);
+      USENAMEDPRINTER_WA("astNode", args, in->args[i]);
     }
     PUTS(")");
   } else {
@@ -387,27 +356,15 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
   }
 });
 
-astNode *astNode_process_file() {}
-//
-//
-//
-
-int main(void) {
-  u8 c[] =
-      {
-#embed "int.txt"
-      };
-  var_ s = fp(c);
-
+msList(astNode *) astNode_process_file(fptr s) {
   var_ b = fptr_next_call(s);
-  astNode *top = NULL;
+  var_ nodes = msList_init(stdAlloc, astNode *);
   do {
     var_ split = fp_split_comma(stdAlloc, b.arg);
     defer { msList_deInit(stdAlloc, split); };
 
     astNode *node = astNode_recurse(b.fun, split);
-    top = top ?: node;
-
+    msList_push(stdAlloc, nodes, node);
     b = fptr_next_call(
         fptr_after(
             s,
@@ -418,6 +375,27 @@ int main(void) {
         )
     );
   } while (b.fun.len && b.fun.ptr);
-  println("tree\t: {astNode}", top);
+  return nodes;
+}
+
+//
+// interpreter
+//
+
+typedef struct {
+  item_type *type;
+  void *place;
+} symbol;
+
+symbol interpret(astNode *astnode) {}
+
+int main(void) {
+  u8 c[] =
+      {
+#embed "int.txt"
+      };
+  var_ list = astNode_process_file(fp(c));
+  println("{msList : astNode}", list);
+  println("{msList : astNode : numbers}", list);
 }
 #include "wheels/wheels.h"
