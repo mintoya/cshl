@@ -12,30 +12,32 @@
 
 typedef struct item_type item_type;
 
+typedef struct item_type_type {
+} item_type_type;
+typedef struct item_type_module {
+} item_type_module;
+
 typedef struct item_type_int {
   usize bitwidth;
   usize alignment;
 } item_type_int;
-typedef struct item_type_type {
-} item_type_type;
 typedef struct item_type_uint {
   usize bitwidth;
   usize alignment;
 } item_type_uint;
 typedef struct item_type_ptr {
-  item_type(*type[1]); // not this one
+  item_type *type; // not this one
   usize alignment;
 } item_type_ptr;
 typedef struct item_type_struct {
-  item_type *types;
+  struct {
+    item_type *type;
+    usize offset;
+  } *types;
   usize alignment;
 } item_type_struct;
-typedef struct item_type_packed_struct {
-  item_type *types;
-  usize alignment;
-} item_type_packed_struct;
 typedef struct item_type_union {
-  item_type *types;
+  item_type **types;
   usize alignment;
 } item_type_union;
 
@@ -47,40 +49,90 @@ typedef struct item_type_block {
 TU_DEFINE(
     (item_type, u8),
     item_type_type,
+    item_type_module,
     item_type_ptr,
     item_type_int,
     item_type_uint,
     item_type_struct,
     item_type_union,
-    item_type_packed_struct,
     item_type_block,
 );
-
+// TODO move off asserts
 #pragma push_macro("max")
 #pragma push_macro("min")
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
+usize type_alignment(item_type *t) {
+  item_type ts = *t;
+  TU_MATCH(
+      (item_type, ts),
+      (item_type_struct, {
+        return $in.alignment;
+      }),
+      (item_type_union, {
+        return $in.alignment;
+      }),
+      (item_type_int, {
+        return $in.alignment;
+      }),
+      (item_type_uint, {
+        return $in.alignment;
+      }),
+      (item_type_ptr, {
+        return $in.alignment;
+      }),
+      (item_type_block, {
+        assertMessage(false, "alignof of function");
+      }),
+      (item_type_module, {
+        assertMessage(false, "alignof of module");
+      }),
+      (item_type_type, {
+        assertMessage(false, "alignof of type type");
+      }),
+      (default, {
+        assertMessage(
+            false, "unhandled type : %s", snprint(stdAlloc, "{}", t->tag).ptr
+        );
+      })
+  );
+  assertMessage(false, "unreachable");
+  return 0;
+}
 usize type_size(item_type *t) {
   item_type ts = *t;
   TU_MATCH(
       (item_type, ts),
       (item_type_struct, {
-
-                         }),
+        usize size = $in.types[msList_len($in.types) - 1].offset;
+        var_ t = $in.types[msList_len($in.types) - 1].type;
+        size += max(type_alignment(t), type_size(t));
+        return size;
+      }),
+      (item_type_union, {
+        usize size = 0;
+        for_each_((var_ t, msList_vla($in.types)), {
+          size = max(size, max(type_alignment(t), type_size(t)));
+        });
+        return size;
+      }),
       (item_type_int, {
-        return max(lineup($in.bitwidth, sizeof(char) * 8), $in.alignment);
+        return lineup($in.bitwidth, sizeof(char) * 8) / 8;
       }),
       (item_type_uint, {
-        return max(lineup($in.bitwidth, sizeof(char) * 8), $in.alignment);
+        return lineup($in.bitwidth, sizeof(char) * 8) / 8;
       }),
       (item_type_ptr, {
-        return max(sizeof(void *) * 8, $in.alignment);
+        return sizeof(void *);
       }),
       (item_type_block, {
-        assertMessage(false, "size of actual function");
+        assertMessage(false, "size of function");
+      }),
+      (item_type_module, {
+        assertMessage(false, "size of module");
       }),
       (item_type_type, {
-        assertMessage(false, "type isnt sizeable type");
+        assertMessage(false, "size of type type");
       }),
       (default, {
         assertMessage(
@@ -240,35 +292,39 @@ msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
 //
 // 'ast'
 //
-#define OPERATIONS_X                                 \
-  NONE,                                              \
-      INT,      /*signed integer (bits)*/            \
-      UINT,     /*unsigned integer(bits)*/           \
-      STRUCT,   /*struct(types)*/                    \
-      PSTRUCT,  /*packed struct(types)*/             \
-      UNION,    /*union(types)*/                     \
-      TYPE,     /*type*/                             \
-      PTR,      /*pointer to (type)*/                \
-      MODULE,   /*module(name,(members...))*/        \
-      MODU_GET, /*get sym from mod(mod,sym)*/        \
-      BLOCK,    /*(inputs,output,instructions)*/     \
-      BEGINS,   /*record custom stack pointer*/      \
-      ENDS,     /*set last custom stack pointer */   \
-      RETURN,   /*return (value)*/                   \
-      LABEL,    /*create(label)*/                    \
-      JMP,      /*jump to (label)*/                  \
-      JMP_IF,   /**/                                 \
-      CALL,     /*call (functionid,(argslist...))*/  \
-      INIT,     /*declare (sym,type?,value)*/        \
-      ASSIGN,   /*assign(sym,value)*/                \
-      ARG,      /*get nth arg (n)*/                  \
-      MOVE,     /*copy(fromptr,toptr)*/              \
-      WHERE,    /*pointer-to(sym)*/                  \
-      ADD,      /*add b to sym(b,sym)*/              \
-      SUB,      /*subtract b from sym(sym,b)*/       \
-      MUL,      /*multiply a by b,then set a (a,b)*/ \
-      DIV,      /*divide a by b , then set a (a,b)*/ \
-      MOD,      /*mod a by b , then set a (a,b)*/
+
+#define OPERATIONS_X                                \
+  NONE,                                             \
+      SINT,    /*signed integer (bits)*/            \
+      UINT,    /*unsigned integer(bits)*/           \
+      STRUCT,  /*struct(types)*/                    \
+      PSTRUCT, /*packed struct(types)*/             \
+      UNION,   /*union(types)*/                     \
+      PTR,     /*pointer to (type)*/                \
+      MODULE,  /*module(name,(members...))*/        \
+      MOD_GET, /*get sym from mod(mod,sym)*/        \
+      BLOCK,   /*(inputs,output,instructions)*/     \
+      BEGINS,  /*record custom stack pointer*/      \
+      ENDS,    /*set last custom stack pointer */   \
+      RETURN,  /*return (value)*/                   \
+      LABEL,   /*create(label)*/                    \
+      JMP,     /*jump to (label)*/                  \
+      JMP_IF,  /**/                                 \
+      CALL,    /*call (functionid,(argslist...))*/  \
+      INIT,    /*declare (sym,type?,value)*/        \
+      ASSIGN,  /*assign(sym,value)*/                \
+      ARG,     /*get nth arg (n)*/                  \
+      MOVE,    /*copy(fromptr,toptr)*/              \
+      WHERE,   /*pointer-to(sym)*/                  \
+      ADD,     /*add b to sym(b,sym)*/              \
+      SUB,     /*subtract b from sym(sym,b)*/       \
+      MUL,     /*multiply a by b,then set a (a,b)*/ \
+      DIV,     /*divide a by b , then set a (a,b)*/ \
+      MOD,     /*mod a by b , then set a (a,b)*/    \
+      TYPE,    /*type*/                             \
+      SIZEOF,  /*size of t (t)*/                    \
+      ALIGNOF, /*align of t (t)*/                   \
+      TYPEOF,  /*type of (expr)*/
 
 #define builtin_string(n) #n,
 char builtins[][8] = {
@@ -428,13 +484,29 @@ msList(astNode *) astNode_process_file(fptr s) {
 // interpreter
 //
 
-typedef struct {
+typedef struct symbol symbol;
+typedef struct symbol {
   item_type *type;
-  void *place;
+  union {
+    void *location; // on the stack
+    msHmap(symbol) module;
+  };
 } symbol;
-symbol interpret(astNode *node, bool fake) {
-  mList(AllocatorV) arenaStack = NULL; // every subsequent arena is based on
-                                       // the prior arena
+
+item_type module_baseSymbol[1] = {
+    [0] = {
+        .tag = TU_MK_TAG(item_type, item_type_module)
+    },
+};
+
+msHmap(symbol) mainmod = NULL;       // main module
+msHmap(symbol) currmod = NULL;       // current module
+mList(symbol) blockstack = NULL;     // function symbol stack
+                                     // destroy at block end
+mList(AllocatorV) arenaStack = NULL; // every subsequent arena is based on
+
+symbol interpret(astNode *node) {
+  // the prior arena
   if (!arenaStack) {
     arenaStack = mList_init(stdAlloc, AllocatorV);
     mList_push(arenaStack, arena_new_ext(stdAlloc, 1024));
@@ -444,8 +516,21 @@ symbol interpret(astNode *node, bool fake) {
       assertMessage(msList_len(node->args) == 0);
       fptr f = node->text;
     } break;
-    case builtin_MODU_GET: {
+    case builtin_MODULE: {
       assertMessage(msList_len(node->args) == 2);
+      msHmap(symbol) newmod = msHmap_init(stdAlloc, symbol);
+      assertMessage(
+          !msHmap_get(currmod, node->args[0]->text),
+          "%s",
+          snprint(stdAlloc, "module name {slice(c8)} collides").ptr
+      );
+      msHmap_set(
+          currmod, node->args[0]->text,
+          ((symbol){
+              .type = module_baseSymbol,
+              .module = newmod,
+          })
+      );
     } break;
   }
 
