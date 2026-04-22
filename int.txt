@@ -1,58 +1,43 @@
-MODULE(,
- ( 
-    MODULE(print , 
-    INIT(i8  ,TYPE,SINT(8)),
-    INIT(putc,BLOCK(i8,,...)),
-    INIT(puts,BLOCK(
-      PTR(i8),,
-      (
-        INIT(i,PTR(i8),ARG(0)),
-        
-        INIT(c,i8,0),
-        LABEL(again),
-        MOVE(i,WHERE(c)),
-
-        JMP_IF(CALL(not,c) , end),
-
-        CALL(putc,c),
-        ASSIGN(i,ADD(i,1)),
-
-        JMP(again),
-
-        LABEL(end),
-        RETURN(),
-      )
+MODULE(
+  mainmod,
+  ( 
+    INIT(u64,UINT(64)),
+    INIT(i32,SINT(32)),
+    INIT(i8 ,SINT(8)),
+    INIT(array, BLOCK(TYPE,TYPE,
+      RETURN(STRUCT(u64,PTR(ARG(0))))
     )),
-  ),
-  MODULE(
-    mainmod,
-    ( 
-      INIT(u64,UINT(64)),
-      INIT(i32,SINT(32)),
-      INIT(i8 ,SINT(8)),
-      INIT(array, BLOCK(TYPE,TYPE,
-        RETURN(STRUCT(u64,PTR(ARG(0))))
-      )),
-      INIT(main,BLOCK(
+    INIT(slice,
+      BLOCK(
+        TYPE,TYPE,
+        (
+          RETURN(
+            STRUCT(
+              u64,
+              PTR(ARG(0))
+            )
+          )
+        )
+      )
+    ),
+    INIT(main,
+      BLOCK(
         (i32,PTR(PTR(i8))),
         i32,
         (
-          INIT(i,i32,0)
-          JMP_IF(EQUAL(i,ARG(0)),end),
+          INIT(i,i32,0),
           LABEL(again),
+          JMP_IF(EQUAL(i,ARG(0)),end),
           BEGINS(),
-            INIT(s,PTR(i8),0)
-            MOVE(ARG(1),s),
+            INIT(s,PTR(i8),ADD((ARG(1)) , i)),
             CALL(puts,(s)),
-            ASSIGN(i,SUB(i,1)),
-            ASSIGN(ARG(1),ADD(ARG(1),1)),
+            ASSIGN(i,ADD(i,1)),
           ENDS(),
           JMP(again),
           LABEL(end),
           RETURN(0)
         )
-      )) ,
-    )
+      )
+    ) ,
   )
- )
 )

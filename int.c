@@ -293,48 +293,55 @@ msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
 // 'ast'
 //
 
-#define OPERATIONS_X                                \
-  NONE,                                             \
-      SINT,    /*signed integer (bits)*/            \
-      UINT,    /*unsigned integer(bits)*/           \
-      STRUCT,  /*struct(types)*/                    \
-      PSTRUCT, /*packed struct(types)*/             \
-      UNION,   /*union(types)*/                     \
-      PTR,     /*pointer to (type)*/                \
-      MODULE,  /*module(name,(members...))*/        \
-      MOD_GET, /*get sym from mod(mod,sym)*/        \
-      BLOCK,   /*(inputs,output,instructions)*/     \
-      BEGINS,  /*record custom stack pointer*/      \
-      ENDS,    /*set last custom stack pointer */   \
-      RETURN,  /*return (value)*/                   \
-      LABEL,   /*create(label)*/                    \
-      JMP,     /*jump to (label)*/                  \
-      JMP_IF,  /**/                                 \
-      CALL,    /*call (functionid,(argslist...))*/  \
-      INIT,    /*declare (sym,type?,value)*/        \
-      ASSIGN,  /*assign(sym,value)*/                \
-      ARG,     /*get nth arg (n)*/                  \
-      MOVE,    /*copy(fromptr,toptr)*/              \
-      WHERE,   /*pointer-to(sym)*/                  \
-      ADD,     /*add b to sym(b,sym)*/              \
-      SUB,     /*subtract b from sym(sym,b)*/       \
-      MUL,     /*multiply a by b,then set a (a,b)*/ \
-      DIV,     /*divide a by b , then set a (a,b)*/ \
-      MOD,     /*mod a by b , then set a (a,b)*/    \
-      TYPE,    /*type*/                             \
-      SIZEOF,  /*size of t (t)*/                    \
-      ALIGNOF, /*align of t (t)*/                   \
-      TYPEOF,  /*type of (expr)*/
+// clang-format off
+#define OPERATIONS_X                                   \
+      X(NONE),                                             \
+      X(SINT),    /*signed integer (bits)*/            \
+      X(UINT),    /*unsigned integer(bits)*/           \
+      X(STRUCT),  /*struct(types)*/                    \
+      X(PSTRUCT), /*packed struct(types)*/             \
+      X(UNION),   /*union(types)*/                     \
+      X(PTR),     /*pointer to (type)*/                \
+      X(MODULE),  /*module(name,(members...))*/        \
+      X(MOD_GET), /*get sym from mod(mod,sym)*/        \
+      X(BLOCK),   /*(inputs,output,instructions)*/     \
+      X(BEGINS),  /*record custom stack pointer*/      \
+      X(ENDS),    /*set last custom stack pointer */   \
+      X(RETURN),  /*return (value)*/                   \
+      X(LABEL),   /*create(label)*/                    \
+      X(JMP),     /*jump to (label)*/                  \
+      X(JMP_IF),  /*if a is true JMP (a,label)*/       \
+      X(CALL),    /*call (functionid,(argslist...))*/  \
+      X(INIT),    /*declare (sym,type?,value)*/        \
+      X(ASSIGN),  /*assign(sym,value)*/                \
+      X(ARG),     /*get nth arg (n)*/                  \
+      X(MOVE),    /*copy(fromptr,toptr)*/              \
+      X(WHERE),   /*pointer-to(sym)*/                  \
+      X(EQUAL),   /* a == b (a,b)*/                    \
+      X(MORE),    /* a > b (a,b)*/                     \
+      X(LESS),    /* a < b (a,b)*/                     \
+      X(ADD),     /*add b to sym(b,sym)*/              \
+      X(SUB),     /*subtract b from sym(sym,b)*/       \
+      X(MUL),     /*multiply a by b,then set a (a,b)*/ \
+      X(DIV),     /*divide a by b , then set a (a,b)*/ \
+      X(MOD),     /*mod a by b , then set a (a,b)*/    \
+      X(TYPE),    /*type*/                             \
+      X(SIZEOF),  /*size of t (t)*/                    \
+      X(ALIGNOF), /*align of t (t)*/                   \
+      X(OFSETOF), /*offset fo n'th st item (st,n)*/    \
+      X(TYPEOF),  /*type of (expr)*/
 
-#define builtin_string(n) #n,
+#define X(n) #n
 char builtins[][8] = {
-    APPLY_N(builtin_string, OPERATIONS_X)
+    OPERATIONS_X
 };
-
-#define builtin_enum(n) builtin_##n,
+#undef X
+#define X(n) builtin_##n
 enum builtin_OP {
-  APPLY_N(builtin_enum, OPERATIONS_X)
+  OPERATIONS_X
 };
+// clang-format on
+
 typedef struct astNode {
   fptr text;
   usize op; // index of builtin
@@ -499,14 +506,50 @@ item_type module_baseSymbol[1] = {
     },
 };
 
-msHmap(symbol) mainmod = NULL;       // main module
-msHmap(symbol) currmod = NULL;       // current module
-mList(symbol) blockstack = NULL;     // function symbol stack
-                                     // destroy at block end
-mList(AllocatorV) arenaStack = NULL; // every subsequent arena is based on
+// clang-format off
+#define OPERATIONS_X                                   \
+      X(NONE),                                             \
+      X(SINT),    /*signed integer (bits)*/            \
+      X(UINT),    /*unsigned integer(bits)*/           \
+      X(STRUCT),  /*struct(types)*/                    \
+      X(PSTRUCT), /*packed struct(types)*/             \
+      X(UNION),   /*union(types)*/                     \
+      X(PTR),     /*pointer to (type)*/                \
+      X(MODULE),  /*module(name,(members...))*/        \
+      X(MOD_GET), /*get sym from mod(mod,sym)*/        \
+      X(BLOCK),   /*(inputs,output,instructions)*/     \
+      X(BEGINS),  /*record custom stack pointer*/      \
+      X(ENDS),    /*set last custom stack pointer */   \
+      X(RETURN),  /*return (value)*/                   \
+      X(LABEL),   /*create(label)*/                    \
+      X(JMP),     /*jump to (label)*/                  \
+      X(JMP_IF),  /*if a is true JMP (a,label)*/       \
+      X(CALL),    /*call (functionid,(argslist...))*/  \
+      X(INIT),    /*declare (sym,type?,value)*/        \
+      X(ASSIGN),  /*assign(sym,value)*/                \
+      X(ARG),     /*get nth arg (n)*/                  \
+      X(MOVE),    /*copy(fromptr,toptr)*/              \
+      X(WHERE),   /*pointer-to(sym)*/                  \
+      X(EQUAL),   /* a == b (a,b)*/                    \
+      X(MORE),    /* a > b (a,b)*/                     \
+      X(LESS),    /* a < b (a,b)*/                     \
+      X(ADD),     /*add b to sym(b,sym)*/              \
+      X(SUB),     /*subtract b from sym(sym,b)*/       \
+      X(MUL),     /*multiply a by b,then set a (a,b)*/ \
+      X(DIV),     /*divide a by b , then set a (a,b)*/ \
+      X(MOD),     /*mod a by b , then set a (a,b)*/    \
+      X(TYPE),    /*type*/                             \
+      X(SIZEOF),  /*size of t (t)*/                    \
+      X(ALIGNOF), /*align of t (t)*/                   \
+      X(OFSETOF), /*offset fo n'th st item (st,n)*/    \
+      X(TYPEOF),  /*type of (expr)*/
 
-symbol interpret(astNode *node) {
-  // the prior arena
+msHmap(symbol) mainmod = NULL;   // main module
+mList(symbol) blockstack = NULL; // function symbol stack
+                                 // destroy at block end
+mList(AllocatorV) arenaStack = NULL;
+// clang-format on
+symbol interpret(msHmap(symbol) current_module, astNode *node) {
   if (!arenaStack) {
     arenaStack = mList_init(stdAlloc, AllocatorV);
     mList_push(arenaStack, arena_new_ext(stdAlloc, 1024));
@@ -520,17 +563,23 @@ symbol interpret(astNode *node) {
       assertMessage(msList_len(node->args) == 2);
       msHmap(symbol) newmod = msHmap_init(stdAlloc, symbol);
       assertMessage(
-          !msHmap_get(currmod, node->args[0]->text),
+          !msHmap_get(current_module, node->args[0]->text),
           "%s",
           snprint(stdAlloc, "module name {slice(c8)} collides").ptr
       );
       msHmap_set(
-          currmod, node->args[0]->text,
+          current_module, node->args[0]->text,
           ((symbol){
               .type = module_baseSymbol,
               .module = newmod,
           })
       );
+      for (usize i = 0; i < msList_len(node->args[1]); i++)
+        interpret(newmod, node->args[1]);
+      return ((symbol){
+          .type = module_baseSymbol,
+          .module = newmod,
+      });
     } break;
   }
 
