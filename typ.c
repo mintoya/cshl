@@ -153,3 +153,83 @@ static usize type_size(item_type *t) {
 }
 #pragma pop_macro("max")
 #pragma pop_macro("min")
+REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
+  if (!in) {
+    PUTS("NULL");
+    return;
+  }
+
+  item_type ts = *in;
+  TU_MATCH(
+      (item_type, ts),
+      (item_type_type, {
+        PUTS("type");
+      }),
+      (item_type_module, {
+        PUTS("module");
+      }),
+      (item_type_sint, {
+        PUTS("i{");
+        USETYPEPRINTER(usize, $in.bitwidth);
+        PUTS("}");
+      }),
+      (item_type_uint, {
+        PUTS("u{");
+        USETYPEPRINTER(usize, $in.bitwidth);
+        PUTS("}");
+      }),
+      (item_type_ptr, {
+        PUTS("ptr(");
+        if ($in.type)
+          USENAMEDPRINTER("item_type", $in.type);
+        PUTS(")");
+      }),
+      (item_type_struct, {
+        PUTS("struct { ");
+        usize len = msList_len($in.types);
+        if (len) {
+          for (usize i = 0; i < len; i++) {
+            if (i > 0)
+              PUTS(", ");
+            PUTS("[");
+            USETYPEPRINTER(usize, $in.types[i].offset);
+            PUTS("]:");
+            if ($in.types[i].type)
+              USENAMEDPRINTER("item_type", $in.types[i].type);
+          }
+        }
+        PUTS(" }");
+      }),
+      (item_type_union, {
+        PUTS("union { ");
+        usize len = msList_len($in.types);
+        if (len) {
+          for (usize i = 0; i < len; i++) {
+            if (i > 0)
+              PUTS(", ");
+            if ($in.types[i])
+              USENAMEDPRINTER("item_type", $in.types[i]);
+          }
+        }
+        PUTS(" }");
+      }),
+      (item_type_block, {
+        PUTS("block(");
+        usize len = msList_len($in.types);
+        if (len) {
+          for (usize i = 0; i < len - 1; i++) {
+            if (i > 0)
+              PUTS(", ");
+            USENAMEDPRINTER("item_type", &$in.types[i]);
+          }
+          PUTS(") -> ");
+          USENAMEDPRINTER("item_type", &$in.types[len - 1]);
+        } else {
+          PUTS(")");
+        }
+      }),
+      (default, {
+        PUTS("unknown");
+      })
+  );
+});

@@ -181,7 +181,8 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
       X(TYPE),    /*type*/                             \
       X(SIZEOF),  /*size of t (t)*/                    \
       X(ALIGNOF), /*align of t (t)*/                   \
-      X(OFSOF),   /*offset fo n'th st item (st,n)*/
+      X(OFSOF),   /*offset fo n'th st item (st,n)*/    \
+      X(ALLOCA),  /*push n of type onto the stack(type,n)*/
 // begins and ends must be within the current function, equivalent of {} in c, jumping across ends must cause ends to be triggered  if after begins
 
 #define X(n) #n

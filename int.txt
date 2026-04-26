@@ -1,4 +1,5 @@
 INIT(i32 , SINT(32)),
+INIT(u32 , UINT(32)),
 INIT(main, BLOCK(
   (PTR(SINT(8)))
   i32,
