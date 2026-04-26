@@ -4,22 +4,6 @@ MODULE(
     INIT(u64,UINT(64)),
     INIT(i32,SINT(32)),
     INIT(i8 ,SINT(8)),
-    INIT(array, BLOCK(TYPE,TYPE,
-      RETURN(STRUCT(u64,PTR(ARG(0))))
-    )),
-    INIT(slice,
-      BLOCK(
-        TYPE,TYPE,
-        (
-          RETURN(
-            STRUCT(
-              u64,
-              PTR(ARG(0))
-            )
-          )
-        )
-      )
-    ),
     INIT(main,
       BLOCK(
         (i32,PTR(PTR(i8))),
