@@ -157,12 +157,9 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
       X(PSTRUCT), /*packed struct(types)*/             \
       X(UNION),   /*union(types)*/                     \
       X(PTR),     /*pointer to (type)*/                \
-      X(MODULE),  /*module(name,(members...))*/        \
-      X(MOD_GET), /*get sym from mod(mod,sym)*/        \
-      X(MOD_SET), /*set sym in   mod(mod,node)*/       \
       X(BLOCK),   /*(inputs,output,instructions)*/     \
       X(BEGINS),  /*record custom stack pointer*/      \
-      X(ENDS),    /*set last custom stack pointer */   \
+      X(ENDS),    /*set last custom stack pointer*/    \
       X(RETURN),  /*return (value)*/                   \
       X(LABEL),   /*create(label)*/                    \
       X(JMP),     /*jump to (label)*/                  \
@@ -185,6 +182,7 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
       X(SIZEOF),  /*size of t (t)*/                    \
       X(ALIGNOF), /*align of t (t)*/                   \
       X(OFSOF),   /*offset fo n'th st item (st,n)*/
+// begins and ends must be within the current function, equivalent of {} in c, jumping across ends must cause ends to be triggered  if after begins
 
 #define X(n) #n
 char builtins[][8] = {
@@ -253,9 +251,8 @@ static astNode *astnode_expand2(fptr f) {
     var_ split = fp_split_comma(astNodes_arena, b.arg);
 
     astNode *node = astNode_expand(0, b.fun, b.fun);
-    for_each_((var_ v, msList_vla(split)), {
+    foreach (var_ v, vla(*msList_vla(split)))
       msList_push(astNodes_arena, node->args, astnode_expand2(v));
-    });
     return node;
   } else if (b.arg.len) { // just parenthesis
     astNode *node = aCreate(astNodes_arena, astNode);
@@ -278,9 +275,8 @@ static astNode *astnode_expand2(fptr f) {
 static astNode *astNode_recurse(fptr call, msList(fptr) args) {
   astNode *node = astNode_expand(0, call, call);
 
-  for_each_((var_ v, msList_vla(args)), {
+  foreach (var_ v, vla(*msList_vla(args)))
     msList_push(astNodes_arena, node->args, astnode_expand2(v));
-  });
 
   return node;
 }
@@ -321,24 +317,27 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
   }
 });
 
-static msList(astNode *) astNode_process_file(fptr s) {
-  var_ b = fptr_next_call(s);
-  var_ nodes = msList_init(stdAlloc, astNode *);
-  do {
-    var_ split = fp_split_comma(stdAlloc, b.arg);
-    defer { msList_deInit(stdAlloc, split); };
+static msList(astNode *) astNode_process_file(AllocatorV allocator, fptr s) {
+  var_ fps = fp_split_comma(allocator, s);
+  msList(astNode *) res = msList_init(allocator, astNode *, msList_len(fps));
+  foreach (fptr s, vla(*msList_vla(fps))) {
+    var_ b = fptr_next_call(s);
+    do {
+      var_ split = fp_split_comma(stdAlloc, b.arg);
+      defer { msList_deInit(stdAlloc, split); };
 
-    astNode *node = astNode_recurse(b.fun, split);
-    msList_push(stdAlloc, nodes, node);
-    b = fptr_next_call(
-        fptr_after(
-            s,
-            ((fptr){
-                b.arg.len + 1,
-                b.arg.ptr,
-            })
-        )
-    );
-  } while (b.fun.len && b.fun.ptr);
-  return nodes;
+      astNode *node = astNode_recurse(b.fun, split);
+      msList_push(stdAlloc, res, node);
+      b = fptr_next_call(
+          fptr_after(
+              s,
+              ((fptr){
+                  b.arg.len + 1,
+                  b.arg.ptr,
+              })
+          )
+      );
+    } while (b.fun.len && b.fun.ptr);
+  }
+  return res;
 }

@@ -1,3 +1,4 @@
+#include "wheels/bigint.h"
 #include "wheels/macros.h"
 #include "wheels/mytypes.h"
 #include "wheels/print.h"
@@ -17,8 +18,12 @@ typedef struct item_type_uint {
   usize bitwidth;
   usize alignment;
 } item_type_uint;
-// typedef struct item_type_dint {
-// } item_type_dint;
+// typedef struct item_type_bint { // will parse integers with this
+//   struct {
+//     usize count;
+//     u8 bits[/*count*/];
+//   } *b; // bits pointer is soemwhat convertable to bigint
+// } item_type_bint;
 typedef struct item_type_ptr {
   item_type *type; // not this one
   usize alignment;
@@ -27,7 +32,7 @@ typedef struct item_type_struct {
   struct {
     item_type *type;
     usize offset;
-  } *types;
+  } *types; // msList
   usize alignment;
 } item_type_struct;
 typedef struct item_type_union {
@@ -56,65 +61,74 @@ TU_DEFINE(
 #pragma push_macro("min")
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
+static usize type_size(item_type *t);
 static usize type_alignment(item_type *t) {
   item_type ts = *t;
+  usize res = 0;
   TU_MATCH(
       (item_type, ts),
-      (item_type_struct, {
-        return $in.alignment;
-      }),
-      (item_type_union, {
-        return $in.alignment;
-      }),
-      (item_type_sint, {
-        return $in.alignment;
-      }),
-      (item_type_uint, {
-        return $in.alignment;
-      }),
-      (item_type_ptr, {
-        return $in.alignment;
-      }),
-      (item_type_block, {
-        assertMessage(false, "alignof of function");
-      }),
-      (item_type_module, {
-        assertMessage(false, "alignof of module");
-      }),
-      (item_type_type, {
-        assertMessage(false, "alignof of type type");
-      }),
+      (item_type_struct, { res = $in.alignment; }),
+      (item_type_union, { res = $in.alignment; }),
+      (item_type_sint, { res = $in.alignment; }),
+      (item_type_uint, { res = $in.alignment; }),
+      (item_type_ptr, { res = $in.alignment; }),
+      (item_type_block, { assertMessage(false, "alignof of function"); }),
+      (item_type_module, { assertMessage(false, "alignof of module"); }),
+      (item_type_type, { assertMessage(false, "alignof of type type"); }),
       (default, {
         assertMessage(
             false, "unhandled type : %s", snprint(stdAlloc, "{}", t->tag).ptr
         );
       })
   );
-  assertMessage(false, "unreachable");
-  return 0;
+
+  if (res)
+    return res;
+  TU_MATCH(
+      (item_type, ts),
+      (item_type_struct, {
+        usize max_align = 1;
+        foreach (var_ t, vla(*msList_vla($in.types)))
+          max_align = max(max_align, type_alignment(t.type));
+        return max_align;
+      }),
+      (item_type_union, {
+        usize max_align = 1;
+        foreach (var_ t, vla(*msList_vla($in.types)))
+          max_align = max(max_align, type_alignment(t));
+        return max_align;
+      }),
+      (default, { return min(type_size(t), 8); }),
+  );
 }
 static usize type_size(item_type *t) {
   item_type ts = *t;
   TU_MATCH(
       (item_type, ts),
       (item_type_struct, {
-        usize size = $in.types[msList_len($in.types) - 1].offset;
-        var_ t = $in.types[msList_len($in.types) - 1].type;
-        size += max(type_alignment(t), type_size(t));
-        return size;
+        usize len = msList_len($in.types);
+        if (!len)
+          return 0;
+
+        var_ last_item = $in.types[len - 1];
+        usize size = last_item.offset + type_size(last_item.type);
+
+        usize align = type_alignment(t);
+        return lineup(size, align);
       }),
       (item_type_union, {
-        usize size = 0;
-        for_each_((var_ t, msList_vla($in.types)), {
-          size = max(size, max(type_alignment(t), type_size(t)));
-        });
-        return size;
+        usize max_size = 0;
+        foreach (var_ t_ptr, vla(*msList_vla($in.types)))
+          max_size = max(max_size, type_size(t_ptr));
+
+        usize align = type_alignment(t);
+        return lineup(max_size, align);
       }),
       (item_type_sint, {
-        return lineup($in.bitwidth, sizeof(char) * 8) / 8;
+        return lineup($in.bitwidth, 8) / 8;
       }),
       (item_type_uint, {
-        return lineup($in.bitwidth, sizeof(char) * 8) / 8;
+        return lineup($in.bitwidth, 8) / 8;
       }),
       (item_type_ptr, {
         return sizeof(void *);

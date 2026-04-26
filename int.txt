@@ -1,27 +1,11 @@
-MODULE(
-  mainmod,
-  ( 
-    INIT(u64,UINT(64)),
-    INIT(i32,SINT(32)),
-    INIT(i8 ,SINT(8)),
-    INIT(main,
-      BLOCK(
-        (i32,PTR(PTR(i8))),
-        i32,
-        (
-          INIT(i,i32,0),
-          LABEL(again),
-          JMP_IF(EQUAL(i,ARG(0)),end),
-          BEGINS(),
-            INIT(s,PTR(i8),ADD((ARG(1)) , i)),
-            CALL(puts,(s)),
-            ASSIGN(i,ADD(i,1)),
-          ENDS(),
-          JMP(again),
-          LABEL(end),
-          RETURN(0)
-        )
-      )
-    ) ,
+INIT(i32 , SINT(32)),
+INIT(main, BLOCK(
+  (PTR(SINT(8)))
+  i32,
+  (
+    CALL(puts ,("hello world")),
+    CALL(puts , (ARG(0))),
+    RETURN(0),
   )
-)
+)),
+CALL(main, ("hello"))
