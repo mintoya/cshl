@@ -1,12 +1,40 @@
-INIT(i32 , SINT(32)),
-INIT(u32 , UINT(32)),
-INIT(main, BLOCK(
-  (PTR(SINT(8)))
-  i32,
+INIT(i32,SINT(32)),
+INIT(u32,UINT(32)),
+INIT(i8,SINT(8)),
+INIT(**i8,PTR(PTR(i8))),
+INIT(puts,BLOCK(
+  (PTR(i8)),i32,
   (
-    CALL(puts ,("hello world")),
-    CALL(puts , (ARG(0))),
+    INIT(s,PTR(i8),0),
+    MOVE(&(ARG(0)),&(s)),
+    INIT(c,i8,0),
+    :(loop),
+    MOVE(s,&(c)),
+    ASSIGN(s,+(s,1)),
+    JMP_IF(==(c,0),end),
+    CALL(putc,(c)),
+    JMP(loop),
+    :(end),
+    CALL(putc,(10)),
     RETURN(0),
   )
 )),
-CALL(main, ("hello"))
+INIT(main,BLOCK(
+  (i32,**i8), i32,
+  (
+    INIT(i,i32,0),
+    INIT(s,PTR(i8),0),
+    :(loop),
+    JMP_IF(==( i , ARG(0)) , end),
+      MOVE(+(ARG(1) , i) , &(s)),
+      CALL(puts ,(s)),
+      =(i,+(i,1)),
+    JMP(loop),
+    :(end),
+    RETURN(0),
+  )
+)),
+INIT(str2 , ALLOCA(PTR(i8),2)),
+MOVE(&("hello"), +(str2 , 0)),
+MOVE(&("world"), +(str2 , 1)),
+CALL(main, (2,str2))

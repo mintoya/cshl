@@ -8,8 +8,6 @@ typedef struct item_type item_type;
 
 typedef struct item_type_type {
 } item_type_type;
-typedef struct item_type_module {
-} item_type_module;
 typedef struct item_type_sint {
   usize bitwidth;
   usize alignment;
@@ -41,14 +39,13 @@ typedef struct item_type_union {
 } item_type_union;
 
 typedef struct item_type_block {
-  item_type *types; // only one return type,
-                    // last item is return type
+  item_type **types; // only one return type,
+                     // last item is return type
 } item_type_block;
 
 TU_DEFINE(
     (item_type, u8),
     item_type_type,
-    item_type_module,
     item_type_ptr,
     item_type_sint,
     item_type_uint,
@@ -62,6 +59,7 @@ TU_DEFINE(
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 static usize type_size(item_type *t);
+// static usize type_alignment(item_type *t);
 static usize type_alignment(item_type *t) {
   item_type ts = *t;
   usize res = 0;
@@ -73,7 +71,6 @@ static usize type_alignment(item_type *t) {
       (item_type_uint, { res = $in.alignment; }),
       (item_type_ptr, { res = $in.alignment; }),
       (item_type_block, { assertMessage(false, "alignof of function"); }),
-      (item_type_module, { assertMessage(false, "alignof of module"); }),
       (item_type_type, { assertMessage(false, "alignof of type type"); }),
       (default, {
         assertMessage(
@@ -136,9 +133,6 @@ static usize type_size(item_type *t) {
       (item_type_block, {
         assertMessage(false, "size of function");
       }),
-      (item_type_module, {
-        assertMessage(false, "size of module");
-      }),
       (item_type_type, {
         assertMessage(false, "size of type type");
       }),
@@ -165,9 +159,6 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
       (item_type_type, {
         PUTS("type");
       }),
-      (item_type_module, {
-        PUTS("module");
-      }),
       (item_type_sint, {
         PUTS("i{");
         USETYPEPRINTER(usize, $in.bitwidth);
@@ -179,13 +170,13 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
         PUTS("}");
       }),
       (item_type_ptr, {
-        PUTS("ptr(");
+        PUTS("*{");
         if ($in.type)
           USENAMEDPRINTER("item_type", $in.type);
-        PUTS(")");
+        PUTS("}");
       }),
       (item_type_struct, {
-        PUTS("struct { ");
+        PUTS("struct{ ");
         usize len = msList_len($in.types);
         if (len) {
           for (usize i = 0; i < len; i++) {
@@ -201,7 +192,7 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
         PUTS(" }");
       }),
       (item_type_union, {
-        PUTS("union { ");
+        PUTS("union{ ");
         usize len = msList_len($in.types);
         if (len) {
           for (usize i = 0; i < len; i++) {
@@ -214,19 +205,17 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
         PUTS(" }");
       }),
       (item_type_block, {
-        PUTS("block(");
-        usize len = msList_len($in.types);
-        if (len) {
-          for (usize i = 0; i < len - 1; i++) {
-            if (i > 0)
-              PUTS(", ");
-            USENAMEDPRINTER("item_type", &$in.types[i]);
-          }
-          PUTS(") -> ");
-          USENAMEDPRINTER("item_type", &$in.types[len - 1]);
-        } else {
-          PUTS(")");
+        PUTS("block{");
+        PUTS("(");
+        foreach (usize i, range(0, msList_len($in.types) - 1)) {
+          if (i)
+            PUTS(",");
+          if ($in.types[i])
+            USENAMEDPRINTER("item_type", ($in.types[i]));
         }
+        PUTS(")");
+        USENAMEDPRINTER("item_type", $in.types[msList_len($in.types) - 1]);
+        PUTS("}");
       }),
       (default, {
         PUTS("unknown");

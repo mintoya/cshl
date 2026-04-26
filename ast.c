@@ -166,9 +166,9 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
       X(JMP_IF),  /*if a is true JMP (a,label)*/       \
       X(CALL),    /*call (functionid,(argslist...))*/  \
       X(INIT),    /*declare (sym,type?,value)*/        \
-      X(ASSIGN),  /*assign(sym,value)*/                \
-      X(ARG),     /*get nth arg (n)*/                  \
+      X(ASSIGN),  /*assign b to a(a,b)*/              \
       X(MOVE),    /*copy(fromptr,toptr)*/              \
+      X(ARG),     /*get nth arg (n)*/                  \
       X(WHERE),   /*pointer-to(sym)*/                  \
       X(EQUAL),   /* a == b (a,b)*/                    \
       X(MORE),    /* a > b (a,b)*/                     \
@@ -177,6 +177,8 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
       X(SUB),     /*subtract b from sym(sym,b)*/       \
       X(MUL),     /*multiply a by b,then set a (a,b)*/ \
       X(DIV),     /*divide a by b , then set a (a,b)*/ \
+      X(SHR),     /*shift a by b (a , b)*/             \
+      X(SHL),     /*shift a by b (a , b)*/             \
       X(MOD),     /*mod a by b , then set a (a,b)*/    \
       X(TYPE),    /*type*/                             \
       X(SIZEOF),  /*size of t (t)*/                    \
@@ -194,8 +196,25 @@ char builtins[][8] = {
 enum builtin_OP {
   OPERATIONS_X
 };
+struct {
+  char alternate[8];
+  enum builtin_OP builtin;
+} builtin_alt[] = {
+    {"=", X(ASSIGN)},
+    {"==", X(EQUAL)},
+    {"<<", X(SHL)},
+    {">>", X(SHR)},
+    {">", X(MORE)},
+    {"<", X(LESS)},
+    {"+", X(ADD)},
+    {"-", X(SUB)},
+    {"*", X(MUL)},
+    {"/", X(DIV)},
+    {"%", X(MOD)},
+    {"&", X(WHERE)},
+    {":", X(LABEL)},
+};
 #undef X
-
 typedef struct astNode {
   fptr text;
   usize op; // index of builtin
@@ -208,11 +227,13 @@ static astNode *astNode_expand(usize op, fptr builtin, fptr text) {
   astNodes_arena = astNodes_arena ?: arena_new_ext(stdAlloc, 1024);
 
   static msHmap(usize) name_to_idx = NULL;
+
   if (!name_to_idx) {
     name_to_idx = msHmap_init(stdAlloc, usize);
-    for (int i = 1; i < countof(builtins); i++) {
+    foreach (int i, range(1, countof(builtins)))
       msHmap_set(name_to_idx, builtins[i], i);
-    }
+    foreach (var_ alt, vla(builtin_alt))
+      msHmap_set(name_to_idx, alt.alternate, alt.builtin);
   }
 
   assertMessage(op || (builtin.len));
