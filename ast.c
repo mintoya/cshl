@@ -208,6 +208,7 @@ struct {
   char alternate[8];
   enum builtin_OP builtin;
 } builtin_alt[] = {
+    {"cp", X(MOVE)},
     {"=", X(ASSIGN)},
     {"==", X(EQUAL)},
     {"<<", X(SHL)},
@@ -231,15 +232,12 @@ typedef struct astNode {
   struct astNode **args;
 } astNode;
 
-static AllocatorV astNodes_arena = NULL;
-
-static astNode *astNode_expand(usize op, fptr builtin, fptr text) {
-  astNodes_arena = astNodes_arena ?: arena_new_ext(stdAlloc, 1024);
+static astNode *astNode_expand(AllocatorV allocator, usize op, fptr builtin, fptr text) {
 
   static msHmap(usize) name_to_idx = NULL;
 
   if (!name_to_idx) {
-    name_to_idx = msHmap_init(stdAlloc, usize);
+    name_to_idx = msHmap_init(allocator, usize);
     foreach (int i, range(1, countof(builtins)))
       msHmap_set(name_to_idx, builtins[i], i);
     foreach (var_ alt, vla(builtin_alt))
@@ -252,13 +250,13 @@ static astNode *astNode_expand(usize op, fptr builtin, fptr text) {
     op = opv ? *opv : op;
   }
 
-  astNode *next = aCreate(astNodes_arena, astNode);
+  astNode *next = aCreate(allocator, astNode);
 
   if (op > 0 && op < countof(builtins)) {
 
     next->op = op;
     next->text = text;
-    next->args = msList_init(astNodes_arena, astNode *);
+    next->args = msList_init(allocator, astNode *);
 
   } else {
 
@@ -266,7 +264,7 @@ static astNode *astNode_expand(usize op, fptr builtin, fptr text) {
         false,
         "unknown builtin  %s",
         snprint(
-            stdAlloc,
+            allocator,
             "index: {}, name: {slice(c8)}",
             op, builtin
         )
@@ -276,27 +274,27 @@ static astNode *astNode_expand(usize op, fptr builtin, fptr text) {
   return next;
 }
 
-static astNode *astnode_expand2(fptr f) {
+static astNode *astnode_expand2(AllocatorV allocator, fptr f) {
   f = fp_trim_space(f);
   struct fptr_next_call_t b = fptr_next_call(f);
   if (b.fun.len) {
-    var_ split = fp_split_comma(astNodes_arena, b.arg);
+    var_ split = fp_split_comma(allocator, b.arg);
 
-    astNode *node = astNode_expand(0, b.fun, b.fun);
+    astNode *node = astNode_expand(allocator, 0, b.fun, b.fun);
     foreach (var_ v, vla(*msList_vla(split)))
-      msList_push(astNodes_arena, node->args, astnode_expand2(v));
+      msList_push(allocator, node->args, astnode_expand2(allocator, v));
     return node;
   } else if (b.arg.len) { // just parenthesis
-    astNode *node = aCreate(astNodes_arena, astNode);
+    astNode *node = aCreate(allocator, astNode);
     node->op = builtin_NONE;
     node->text = f;
-    node->args = msList_init(astNodes_arena, astNode *);
-    var_ split = fp_split_comma(astNodes_arena, b.arg);
+    node->args = msList_init(allocator, astNode *);
+    var_ split = fp_split_comma(allocator, b.arg);
     for (usize i = 0; i < msList_len(split); i++)
-      msList_push(astNodes_arena, node->args, astnode_expand2(split[i]));
+      msList_push(allocator, node->args, astnode_expand2(allocator, split[i]));
     return node;
   } else { // id
-    astNode *node = aCreate(astNodes_arena, astNode);
+    astNode *node = aCreate(allocator, astNode);
     node->op = builtin_NONE;
     node->text = f;
     node->args = NULL;
@@ -304,11 +302,11 @@ static astNode *astnode_expand2(fptr f) {
   }
 }
 
-static astNode *astNode_recurse(fptr call, msList(fptr) args) {
-  astNode *node = astNode_expand(0, call, call);
+static astNode *astNode_recurse(AllocatorV allocator, fptr call, msList(fptr) args) {
+  astNode *node = astNode_expand(allocator, 0, call, call);
 
   foreach (var_ v, vla(*msList_vla(args)))
-    msList_push(astNodes_arena, node->args, astnode_expand2(v));
+    msList_push(allocator, node->args, astnode_expand2(allocator, v));
 
   return node;
 }
@@ -355,11 +353,11 @@ static msList(astNode *) astNode_process_file(AllocatorV allocator, fptr s) {
   foreach (fptr s, vla(*msList_vla(fps))) {
     var_ b = fptr_next_call(s);
     do {
-      var_ split = fp_split_comma(stdAlloc, b.arg);
-      defer { msList_deInit(stdAlloc, split); };
+      var_ split = fp_split_comma(allocator, b.arg);
+      defer { msList_deInit(allocator, split); };
 
-      astNode *node = astNode_recurse(b.fun, split);
-      msList_push(stdAlloc, res, node);
+      astNode *node = astNode_recurse(allocator, b.fun, split);
+      msList_push(allocator, res, node);
       b = fptr_next_call(
           fptr_after(
               s,

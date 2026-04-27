@@ -12,14 +12,13 @@ INIT(puts,BLOCK(
     INIT(s,PTR(i8),0),
     MOVE(&($(0)),&(s)),
     INIT(c,i8,0),
-    LABEL(loop),
+    :(loop),
     MOVE(s,&(c)),
     =(s,+(s,1)),
     JMP_IF(==(c,0),end),
     CALL(putc,(c)),
     JMP(loop),
-    LABEL(end),
-    CALL(putc,(13)),
+    :(end),
     CALL(putc,(10)),
     RETURN(0),
   )
@@ -29,17 +28,19 @@ INIT(main,BLOCK(
   (
     INIT(i,i32,0),
     INIT(s,PTR(i8),0),
-    LABEL(loop),
+    :(loop),
     JMP_IF(==( i , $(0)) , end),
       MOVE(+($(1) , i) , &(s)),
       CALL(puts ,(s)),
       =(i,+(i,1)),
     JMP(loop),
-    LABEL(end),
+    :(end),
     RETURN(0),
   )
 )),
+
 INIT(str2 , ALLOCA(PTR(i8),7)),
+
 MOVE(&("this"),      +(str2 , 0)),
 MOVE(&("is"),        +(str2 , 1)),
 MOVE(&("an"),        +(str2 , 2)),
@@ -47,4 +48,5 @@ MOVE(&("example"),   +(str2 , 3)),
 MOVE(&("of"),        +(str2 , 4)),
 MOVE(&("an"),        +(str2 , 5)),
 MOVE(&("args list"), +(str2 , 6)),
+
 CALL(main, (7,str2))

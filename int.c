@@ -35,10 +35,12 @@ struct intHandle {
   bool issigned;
   usize bitcount;
 };
+AllocatorV iType_alllocator = NULL;
 item_type *get_itype(struct intHandle h) {
+  assertMessage(iType_alllocator);
   static mHmap(typeof(h), item_type *) imap = NULL;
   if (!imap) {
-    imap = mHmap_init(stdAlloc, typeof(h), item_type *);
+    imap = mHmap_init(iType_alllocator, typeof(h), item_type *);
     // set up signed and unsigned
     // 8, 16, 32, 64
     usize widths[] = {8, 16, 32, 64};
@@ -50,7 +52,7 @@ item_type *get_itype(struct intHandle h) {
               .bitcount = j,
           }),
           item_type_allocate_from(
-              stdAlloc,
+              iType_alllocator,
               TU_OF(
                   (item_type, item_type_uint),
                   ((item_type_uint){
@@ -69,7 +71,7 @@ item_type *get_itype(struct intHandle h) {
         imap,
         h,
         item_type_allocate_from(
-            stdAlloc,
+            iType_alllocator,
             h.issigned
                 ? TU_OF(
                       (item_type, item_type_sint),
@@ -531,12 +533,13 @@ symbol interpret(
       // push arguments
       foreach (var_ arg, vla(*msList_vla(args)))
         mList_pushArr(stack, *VLAP((u8 *)&arg, sizeof(arg)));
+
       msList_deInit(allocator, args); // get rid of temporary list
 
       //
       // add to symbol stack
       //
-      mList_push(symbols, msHmap_init(arena_new_ext(msHmap_allocator(mList_last(symbols)), 1024), symbol));
+      mList_push(symbols, msHmap_init(arena_new_ext(msHmap_allocator(mList_last(symbols)), 512), symbol));
       defer {
         arena_cleanup(msHmap_allocator(mList_last(symbols)));
         mList_pop(symbols);
@@ -1000,7 +1003,7 @@ void generate_externs(mList(msHmap(symbol)) symbols) {
       mList_last(symbols),
       "putc",
       ((symbol){
-          .type = make_block(stdAlloc, puts_it),
+          .type = make_block(ms_allocator, puts_it),
           .is_extern = 1,
           .external = extern_putc // <-- Pointer assigned
       })
@@ -1024,27 +1027,43 @@ fptr read_stdin(AllocatorV allocator) {
   return (fptr){size, (u8 *)data};
 }
 int main(void) {
-  // var_ list = astNode_process_file(stdAlloc, read_stdin(stdAlloc));
 
-  c8 lit[] =
-      {
-#embed "int.txt"
-      };
-  var_ list = astNode_process_file(stdAlloc, fp(lit));
+  AllocatorV astArena = arena_new_ext(stdAlloc, 512);
+  defer { arena_cleanup(astArena); };
+
+  var_ stin = read_stdin(stdAlloc);
+  defer { slice_free(stdAlloc, stin); };
+  var_ list = astNode_process_file(astArena, stin);
+
+  iType_alllocator = arena_new_ext(stdAlloc, 512);
+  defer { arena_cleanup(iType_alllocator); };
+
+  //   c8 lit[] =
+  //       {
+  // #embed "int.txt"
+  //       };
+  //   var_ list = astNode_process_file(stdAlloc, fp(lit));
   // println("{msList : astNode}", list);
   // println("{msList : astNode : numbers}", list);
-  var_ stack = mList_init(stdAlloc, u8);
 
-  var_ symbols = mList_init(stdAlloc, msHmap(symbol));
-  mList_push(symbols, (msHmap_init(stdAlloc, symbol)));
+  var_ stack = mList_init(stdAlloc, u8);
+  defer { mList_deInit(stack); };
+
+  AllocatorV symArena = arena_new_ext(stdAlloc, 512);
+  defer { arena_cleanup(symArena); };
+
+  var_ stack_frames = mList_init(symArena, usize);
+  var_ symbols = mList_init(symArena, msHmap(symbol));
+  mList_push(symbols, (msHmap_init(symArena, symbol)));
+
   generate_externs(symbols);
 
   foreach (var_ node, vla(*msList_vla(list)))
     interpret(
         stdAlloc,
         stack,
-        mList_init(stdAlloc, usize),
-        mList_init(stdAlloc, usize),
+        stack_frames,
+        NULL, // never uses this
         node,
         symbols
     );
