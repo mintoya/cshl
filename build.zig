@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
             }),
             .strip = false,
         }),
-        .use_llvm = false,
+        // .use_llvm = false,
     });
 
 

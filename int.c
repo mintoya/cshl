@@ -5,7 +5,8 @@
 #include "wheels/mytypes.h"
 #include "wheels/tagged_unions.h"
 #include <assert.h>
-#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
 
 typedef struct symbol symbol;
 typedef struct symbol {
@@ -13,10 +14,13 @@ typedef struct symbol {
   struct {
     bool is_type : 1; // litterally the type
     bool is_function : 1;
+    bool is_extern : 1; // handled here
+    bool is_value : 1;
   };
   union {
     usize location;
     astNode *funptr;
+    symbol (*external)(usize return_addr, mList(u8) stack, mList(usize) stack_frame);
   };
 } symbol;
 static_assert(!(sizeof(symbol) % sizeof(usize)));
@@ -71,7 +75,7 @@ item_type *get_itype(struct intHandle h) {
                       (item_type, item_type_sint),
                       ((item_type_sint){
                           .bitwidth = h.bitcount,
-                          .alignment = lineup(h.bitcount, 8) * 8,
+                          .alignment = lineup(h.bitcount, 8) / 8,
                       })
                   )
                 : TU_OF(
@@ -107,6 +111,13 @@ item_type *make_block(AllocatorV allocator, msList(item_type *) typething) {
       })
   );
   return res;
+}
+bool item_type_equal(AllocatorV allocator, item_type *a, item_type *b) { // TODO actaully check the types
+  var_ at = snprint(allocator, "{item_type}", a);
+  defer{slice_free(allocator, at)};
+  var_ bt = snprint(allocator, "{item_type}", b);
+  defer{slice_free(allocator, bt)};
+  return fptr_eq(*(fptr *)&at, *(fptr *)&bt);
 }
 
 item_type *get_ptr_iType(item_type *t) {
@@ -184,10 +195,10 @@ symbol interpret(
     );
   };
   /*
+   *  returned
    * -- stack frame --
-   * type
-   * item
-   * ...
+   *  count
+   *  symbols ...
    */
   switch ((enum builtin_OP)(node->op)) {
     case builtin_NONE: {
@@ -198,6 +209,7 @@ symbol interpret(
         mList_pushArr(stack, *VLAP((u8 *)&num, sizeof(num)));
         return (symbol){
             .location = res,
+            .is_value = 1,
             .type = get_itype(
                 (struct intHandle){
                     .bitcount = sizeof(u64) * 8,
@@ -219,6 +231,7 @@ symbol interpret(
 
         return (symbol){
             .location = resp,
+            .is_value = 1,
             .type = make_ptr(
                 msHmap_allocator(mList_last(symbols)),
                 get_itype(
@@ -255,7 +268,7 @@ symbol interpret(
             snprint(stdAlloc, "{slice(c8)}", node->text).ptr
         );
 
-        // only integer literals rn
+        // TODO  call interpret
         assertMessage(node->args[2]->op == builtin_NONE && fptr_is_number(node->args[2]->text));
         usize val = fptr_to_number(node->args[2]->text);
 
@@ -275,6 +288,7 @@ symbol interpret(
             last,
             node->args[0]->text,
             ((symbol){
+                .is_value = true,
                 .type = type_sym.type,
                 .location = loc,
             })
@@ -333,13 +347,13 @@ symbol interpret(
       return (symbol){
           .type = make_block(msHmap_allocator(mList_last(symbols)), result_return_type),
           .is_function = 1,
-          .funptr = node->args[2],
+          .funptr = node->args[2], //  (...)
       };
     } break;
     case builtin_ARG: {
       assertMessage(msList_len(node->args) == 1);
       var_ n = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
-      assertMessage(n.type->tag == TU_MK_TAG(item_type, item_type_uint));
+      assertMessage(TU_IS((item_type, item_type_uint), (n.type[0])));
 
       var_ idx = *(usize *)(mList_arr(stack) + n.location);
       var_ argCount = *(usize *)(mList_arr(stack) + mList_last(stack_frames));
@@ -347,7 +361,173 @@ symbol interpret(
       // TODO independent function for this
       return ((symbol *)(mList_arr(stack) + mList_last(stack_frames) + sizeof(usize)))[idx];
     } break;
-    // these are implemented with gemini
+    case builtin_CALL: {
+      assertMessage(msList_len(node->args) == 2);
+
+      astNode *function_ex = node->args[0];
+      astNode *function_args = node->args[1];
+
+      assertMessage(!function_args->op, "function arguments must be in parenthesized list");
+
+      var_ function = interpret(allocator, stack, stack_frames, temp_frames, function_ex, symbols);
+      assertMessage(function.is_function || function.is_extern, "calling non-function");
+
+      assertMessage(
+          msList_len(function.type->_item_type_block.types) - 1 == msList_len(function_args->args),
+          "expected %i args, got %i", msList_len(function.type->_item_type_block.types) - 1, msList_len(function_args->args)
+      );
+
+      msList(symbol) args = msList_init(allocator, symbol, msList_len(function_args->args) ?: 1);
+      foreach (var_ arg, range(0, msList_len(function_args->args))) {
+        var_ s = interpret(allocator, stack, stack_frames, temp_frames, function_args->args[arg], symbols);
+        var_ expected_type = function.type->_item_type_block.types[arg];
+
+        if (!item_type_equal(allocator, s.type, expected_type)) { // type coercion
+          usize expected_bytes = type_size(expected_type);
+          usize s_bytes = type_size(s.type);
+
+          if (expected_bytes <= 8 && s_bytes <= 8) {
+            u64 val = 0;
+            memcpy(&val, &mList_arr(stack)[s.location], s_bytes);
+
+            bool s_signed = s.type && TU_IS((item_type, item_type_sint), s.type[0]);
+            if (s_signed && s_bytes < 8) {
+              u64 shift = (8 - s_bytes) * 8;
+              val = (u64)(((i64)(val << shift)) >> shift);
+            }
+
+            usize coerced_loc = mList_len(stack);
+            mList_pushArr(stack, *VLAP((u8 *)&val, expected_bytes));
+            while (mList_len(stack) % 8)
+              mList_push(stack, 0);
+
+            s = (symbol){
+                .type = expected_type,
+                .location = coerced_loc,
+                .is_value = 1
+            };
+          } else {
+            assertMessage(
+                false,
+                "type mismatch: expected %s, got %s",
+                snprint(stdAlloc, "{item_type}", expected_type).ptr,
+                snprint(stdAlloc, "{item_type}", s.type).ptr
+            );
+          }
+        }
+        msList_push(allocator, args, s);
+      }
+      //
+      // stack space
+      //
+
+      // push space for return type
+      var_ return_type = function.type->_item_type_block.types[msList_len(function.type->_item_type_block.types) - 1];
+      usize return_size = lineup(type_size(return_type), sizeof(usize));
+      usize return_addr = mList_len(stack);
+      mList_pushArr(stack, *VLAP((u8 *)NULL, return_size));
+      // record stack pointer
+      mList_push(stack_frames, mList_len(stack));
+      // push length
+      usize acount = msList_len(function.type->_item_type_block.types) - 1;
+      mList_pushArr(stack, *VLAP((u8 *)&acount, sizeof(usize)));
+      // push arguments
+      foreach (var_ arg, vla(*msList_vla(args)))
+        mList_pushArr(stack, *VLAP((u8 *)&arg, sizeof(arg)));
+      msList_deInit(allocator, args); // get rid of temporary list
+
+      //
+      // add to symbol stack
+      //
+      mList_push(symbols, msHmap_init(arena_new_ext(msHmap_allocator(mList_last(symbols)), 1024), symbol));
+      defer {
+        arena_cleanup(msHmap_allocator(mList_last(symbols)));
+        mList_pop(symbols);
+      }; //  will remove both the symbols and the allocator
+
+      //
+      //  begin execution
+      //
+
+      if (function.is_function) {
+        var_ labels = msHmap_init(allocator, usize, 20);
+        defer { msHmap_deinit(labels); };
+
+        assertMessage(!function.funptr->op);
+        var_ ops = function.funptr->args; // list of operations
+        foreach (var_ opn, range(0, msList_len(ops))) {
+          if (ops[opn]->op == builtin_LABEL) {
+            assertMessage(msList_len(ops[opn]->args) == 1);
+            assertMessage(!ops[opn]->args[0]->op);
+            msHmap_set(labels, ops[opn]->args[0]->text, opn);
+          }
+        }
+        for (usize opn = 0; opn < msList_len(ops); opn++) {
+          switch (ops[opn]->op) {
+            case builtin_LABEL: {
+            } break;
+            case builtin_JMP:
+            case builtin_JMP_IF: {
+              assertMessage(msList_len(ops[opn]->args) == (ops[opn]->op == builtin_JMP ? 1 : 2));
+
+              var_ label = msHmap_get(labels, ops[opn]->args[ops[opn]->op == builtin_JMP ? 0 : 1]->text);
+
+              if (!label)
+                assertMessage(false, "unknown label : %s", snprint(stdAlloc, "slice(c8)", ops[opn]->args[0]).ptr);
+              if (ops[opn]->op == builtin_JMP)
+                opn = *label;
+              else {
+                var_ condition = interpret(allocator, stack, stack_frames, temp_frames, ops[opn]->args[0], symbols);
+                assertMessage(!condition.is_value, "condition is not a value");
+                // memzerod
+                usize len = type_size(condition.type);
+                u8 *loc = mList_arr(stack) + condition.location;
+
+                if (memchr(loc, 0, len))
+                  continue;
+                else
+                  opn = *label;
+              }
+            } break;
+            case builtin_RETURN: {
+              assertMessage(msList_len(ops[opn]->args) == 1);
+              bool is_iteral_zero = ops[opn]->args[0]->op == 0 && fptr_eq(fp("0"), ops[opn]->args[0]->text);
+              // literal 0 allowed , otherwise types should be equal
+              var_ return_addr_ptr = mList_arr(stack) + return_addr;
+              if (is_iteral_zero) {
+                memset(return_addr_ptr, 0, return_size);
+              } else {
+                var_ retval = interpret(allocator, stack, stack_frames, temp_frames, ops[opn]->args[0], symbols);
+                assertMessage(item_type_equal(allocator, retval.type, return_type));
+                memcpy(return_addr_ptr, mList_arr(stack) + retval.location, return_size);
+              }
+              goto endloop;
+            } break;
+            default: {
+              interpret(allocator, stack, stack_frames, temp_frames, ops[opn], symbols);
+            } break;
+          }
+        }
+        {
+        endloop:
+          mList_len(stack) = mList_pop(stack_frames);
+          return (symbol){
+              .type = return_type,
+              .location = return_addr,
+          };
+        }
+      } else if (function.is_extern) {
+        function.external(return_addr, stack, stack_frames); // execute and ignore dummy return
+        mList_len(stack) = mList_pop(stack_frames);
+        return (symbol){
+            .type = return_type,
+            .location = return_addr,
+        };
+      } else {
+        assertMessage(false, "unknown function type ");
+      }
+    } break;
+    // TODO cheeck these
     case builtin_EQUAL:
     case builtin_MORE:
     case builtin_LESS: {
@@ -360,8 +540,8 @@ symbol interpret(
       item_type *ta = a_sym.type;
       item_type *tb = b_sym.type;
 
-      bool a_is_ptr = ta->tag == TU_MK_TAG(item_type, item_type_ptr);
-      bool b_is_ptr = tb->tag == TU_MK_TAG(item_type, item_type_ptr);
+      bool a_is_ptr = TU_IS((item_type, item_type_ptr), ta[0]);
+      bool b_is_ptr = TU_IS((item_type, item_type_ptr), tb[0]);
 
       usize a_bytes = type_size(ta);
       usize b_bytes = type_size(tb);
@@ -375,7 +555,7 @@ symbol interpret(
       bool a_signed = false, b_signed = false;
 
       if (!a_is_ptr) {
-        a_signed = ta->tag == TU_MK_TAG(item_type, item_type_sint);
+        a_signed = TU_IS((item_type, item_type_sint), ta[0]);
         if (a_signed && a_bytes < 8) {
           u64 shift = (8 - a_bytes) * 8;
           a_val = (u64)(((i64)(a_val << shift)) >> shift);
@@ -383,7 +563,7 @@ symbol interpret(
       }
 
       if (!b_is_ptr) {
-        b_signed = tb->tag == TU_MK_TAG(item_type, item_type_sint);
+        b_signed = TU_IS((item_type, item_type_sint), tb[0]);
         if (b_signed && b_bytes < 8) {
           u64 shift = (8 - b_bytes) * 8;
           b_val = (u64)(((i64)(b_val << shift)) >> shift);
@@ -452,9 +632,10 @@ symbol interpret(
       var_ t = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
       assertMessage(t.is_type);
 
-      var_ count_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
+      var_ amt = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
+      assertMessage(TU_IS((item_type, item_type_uint), amt.type[0]));
 
-      usize count = *(usize *)(&mList_arr(stack)[count_sym.location]);
+      usize count = *(usize *)(&mList_arr(stack)[amt.location]);
 
       usize type_bytes = type_size(t.type);
       usize total_bytes = count * type_bytes;
@@ -477,8 +658,8 @@ symbol interpret(
       var_ src_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
       var_ dest_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
 
-      assertMessage(src_sym.type && src_sym.type->tag == TU_MK_TAG(item_type, item_type_ptr), "move source must be a pointer");
-      assertMessage(dest_sym.type && dest_sym.type->tag == TU_MK_TAG(item_type, item_type_ptr), "move destination must be a pointer");
+      assertMessage(src_sym.type && TU_IS((item_type, item_type_ptr), src_sym.type[0]), "move source must be a pointer");
+      assertMessage(dest_sym.type && TU_IS((item_type, item_type_ptr), dest_sym.type[0]), "move destination must be a pointer");
 
       // Dereference both to get their actual virtual addresses (stack indices)
       usize src_ptr = *(usize *)(&mList_arr(stack)[src_sym.location]);
@@ -538,8 +719,8 @@ symbol interpret(
       item_type *ta = a_sym.type;
       item_type *tb = b_sym.type;
 
-      bool a_is_ptr = ta->tag == TU_MK_TAG(item_type, item_type_ptr);
-      bool b_is_ptr = tb->tag == TU_MK_TAG(item_type, item_type_ptr);
+      bool a_is_ptr = TU_IS((item_type, item_type_ptr), ta[0]);
+      bool b_is_ptr = TU_IS((item_type, item_type_ptr), tb[0]);
 
       assertMessage(!(a_is_ptr && b_is_ptr), "pointer to pointer math unimplemented");
 
@@ -565,7 +746,7 @@ symbol interpret(
 
         ptr_inner_type = get_ptr_iType(ta);
       } else {
-        a_signed = ta->tag == TU_MK_TAG(item_type, item_type_sint);
+        a_signed = TU_IS((item_type, item_type_sint), ta[0]);
         a_bits = get_int_bitwidth(ta);
         if (a_signed && a_bytes < 8) {
           u64 shift = (8 - a_bytes) * 8;
@@ -575,21 +756,19 @@ symbol interpret(
       if (b_is_ptr) {
         ptr_inner_type = get_ptr_iType(tb);
       } else {
-        b_signed = tb->tag == TU_MK_TAG(item_type, item_type_sint);
+        b_signed = TU_IS((item_type, item_type_sint), tb[0]);
         b_bits = get_int_bitwidth(tb);
         if (b_signed && b_bytes < 8) {
           u64 shift = (8 - b_bytes) * 8;
           b_val = (u64)(((i64)(b_val << shift)) >> shift);
         }
       }
-
       item_type *res_type = NULL;
       u64 res_val = 0;
 
       if (a_is_ptr || b_is_ptr) {
         usize stride = type_size(ptr_inner_type);
-        if (!stride)
-          stride = 1;
+        assertMessage(stride);
 
         if (node->op == builtin_ADD) {
           if (a_is_ptr)
@@ -640,131 +819,10 @@ symbol interpret(
       mList_pushArr(stack, *VLAP((u8 *)&res_val, res_bytes));
       while (mList_len(stack) % 8)
         mList_push(stack, 0);
-
       return (symbol){
           .type = res_type,
           .location = res_loc,
       };
-    } break;
-    case builtin_CALL: {
-      assertMessage(msList_len(node->args) == 2);
-
-      astNode *func_node = node->args[0];
-      astNode *args_node = node->args[1];
-
-      // 1. Evaluate arguments before pushing the new frame
-      usize arg_count = args_node->op == builtin_NONE ? msList_len(args_node->args) : 0;
-      symbol *arg_syms = aCreate(stdAlloc, symbol, arg_count ?: 1);
-      if (arg_count) {
-        usize i = 0;
-        foreach (var_ arg_ast, vla(*msList_vla(args_node->args))) {
-          arg_syms[i++] = interpret(allocator, stack, stack_frames, temp_frames, arg_ast, symbols);
-        }
-      }
-
-      // 2. Intercept native C functions (e.g., puts)
-      if (func_node->op == builtin_NONE && !symbolResolve(symbols, func_node->text)) {
-        if (fptr_eq(func_node->text, fp("putc"))) {
-
-          assertMessage(arg_count == 1, "putc expects 1 argument");
-
-          symbol c_sym = arg_syms[0];
-
-          char c_val = mList_arr(stack)[c_sym.location];
-
-          putchar(c_val);
-          // fflush(stdout);
-
-          return (symbol){};
-        }
-        assertMessage(false, "unknown native function %s", snprint(stdAlloc, "{slice(c8)}", func_node->text).ptr);
-      }
-
-      // 3. Resolve user-defined block
-      symbol func_sym = interpret(allocator, stack, stack_frames, temp_frames, func_node, symbols);
-      assertMessage(func_sym.is_function, "attempted to call a non-function");
-
-      // 4. Setup Stack Frame
-      usize frame_start = mList_len(stack);
-      mList_push(stack_frames, frame_start);
-
-      // where ARGS draws from
-      // TODO independent function for this
-      mList_pushArr(stack, *VLAP((u8 *)&arg_count, sizeof(arg_count)));
-      for (usize i = 0; i < arg_count; i++)
-        mList_pushArr(stack, *VLAP((u8 *)&(arg_syms[i]), sizeof(arg_syms[i])));
-
-      // Create new lexical scope with its own arena
-      AllocatorV parent_alloc = msHmap_allocator(mList_last(symbols));
-      AllocatorV scope_alloc = arena_new_ext(parent_alloc, 4096);
-      mList_push(symbols, msHmap_init(scope_alloc, symbol));
-
-      // 5. Execute block statements
-      astNode *body_tuple = (astNode *)func_sym.funptr;
-      assertMessage(body_tuple->op == builtin_NONE, "block body must be a tuple");
-
-      var_ stmts_vla = *msList_vla(body_tuple->args);
-      usize num_stmts = msList_len(body_tuple->args);
-
-      // 5a. Pre-pass: Map labels to their index
-      msHmap(usize) labels = msHmap_init(scope_alloc, usize);
-      for (usize i = 0; i < num_stmts; i++) {
-        astNode *stmt = stmts_vla[i];
-        if (stmt->op == builtin_LABEL) {
-          assertMessage(msList_len(stmt->args) == 1, "LABEL expects 1 argument");
-          msHmap_set(labels, stmt->args[0]->text, i);
-        }
-      }
-
-      // 5b. Execution Loop
-      symbol ret_sym = {0};
-      for (usize i = 0; i < num_stmts; i++) {
-        astNode *stmt = stmts_vla[i];
-
-        if (stmt->op == builtin_LABEL) {
-          continue;
-        } else if (stmt->op == builtin_JMP) {
-          assertMessage(msList_len(stmt->args) == 1, "JMP expects 1 argument");
-          usize *target = msHmap_get(labels, stmt->args[0]->text);
-          assertMessage(target, "JMP to unknown label: %s", snprint(stdAlloc, "{slice(c8)}", stmt->args[0]->text).ptr);
-          i = *target;
-          continue;
-        } else if (stmt->op == builtin_JMP_IF) {
-          assertMessage(msList_len(stmt->args) == 2, "JMP_IF expects 2 arguments");
-          var_ cond_sym = interpret(scope_alloc, stack, stack_frames, temp_frames, stmt->args[0], symbols);
-
-          usize cond_bytes = type_size(cond_sym.type);
-          u64 cond_val = 0;
-          memcpy(&cond_val, &mList_arr(stack)[cond_sym.location], cond_bytes);
-
-          if (cond_val) {
-            usize *target = msHmap_get(labels, stmt->args[1]->text);
-            assertMessage(target, "JMP_IF to unknown label: %s", snprint(stdAlloc, "{slice(c8)}", stmt->args[1]->text).ptr);
-            i = *target;
-          }
-          continue;
-        }
-
-        // Pass the arena down so internal operations use it
-        ret_sym = interpret(scope_alloc, stack, stack_frames, temp_frames, stmt, symbols);
-        if (stmt->op == builtin_RETURN) {
-          break;
-        }
-      }
-
-      // 6. Teardown
-      if (ret_sym.type) {
-        // Promote the return type to the parent allocator so it survives the arena cleanup
-        ret_sym.type = item_type_allocate_from(parent_alloc, *ret_sym.type);
-      } else {
-        assertMessage(false, "no return doesnt work rn");
-      }
-
-      mList_pop(symbols);
-      mList_pop(stack_frames);
-      arena_cleanup(scope_alloc);
-
-      return ret_sym;
     } break;
     case builtin_ASSIGN: {
       assertMessage(msList_len(node->args) == 2);
@@ -785,7 +843,7 @@ symbol interpret(
         memcpy(&val, &mList_arr(stack)[src_sym.location], src_bytes);
 
         // Sign extend if source is a signed integer
-        bool src_signed = src_sym.type && src_sym.type->tag == TU_MK_TAG(item_type, item_type_sint);
+        bool src_signed = src_sym.type && TU_IS((item_type, item_type_sint), src_sym.type[0]);
         if (src_signed && src_bytes < 8) {
           u64 shift = (8 - src_bytes) * 8;
           val = (u64)(((i64)(val << shift)) >> shift);
@@ -802,8 +860,6 @@ symbol interpret(
             copy_size
         );
       }
-
-      // Return the destination symbol so chained assignments (e.g. a = b = c) work seamlessly
       return dest_sym;
     } break;
     case builtin_RETURN: {
@@ -815,7 +871,39 @@ symbol interpret(
     } break;
   }
 }
+#include <stdio.h>
 
+symbol extern_putc(usize return_addr, mList(u8) stack, mList(usize) stack_frames) {
+  usize frame_start = mList_last(stack_frames);
+
+  usize acount = *(usize *)(mList_arr(stack) + frame_start);
+  assertMessage(acount == 1);
+
+  symbol *args = (symbol *)(mList_arr(stack) + frame_start + sizeof(usize));
+
+  char c = *(char *)(mList_arr(stack) + args[0].location);
+  // println("input : {item_type}", args[0].type);
+  // println("extern putc : {i8} , {c8}", c, c);
+  // i32 result = 1;
+  i32 result = putchar(c);
+  *(i32 *)(mList_arr(stack) + return_addr) = result;
+  return (symbol){};
+}
+void generate_externs(mList(msHmap(symbol)) symbols) {
+  AllocatorV ms_allocator = ((List *)symbols)->allocator;
+  var_ puts_it = msList_init(ms_allocator, item_type *);
+  msList_push(ms_allocator, puts_it, get_itype((struct intHandle){.bitcount = 8, .issigned = 1}));
+  msList_push(ms_allocator, puts_it, get_itype((struct intHandle){.bitcount = 32, .issigned = 1}));
+  msHmap_set(
+      mList_last(symbols),
+      "putc",
+      ((symbol){
+          .type = make_block(stdAlloc, puts_it),
+          .is_extern = 1,
+          .external = extern_putc // <-- Pointer assigned
+      })
+  );
+}
 int main(void) {
   u8 c[] =
       {
@@ -828,6 +916,7 @@ int main(void) {
 
   var_ symbols = mList_init(stdAlloc, msHmap(symbol));
   mList_push(symbols, (msHmap_init(stdAlloc, symbol)));
+  generate_externs(symbols);
 
   foreach (var_ node, vla(*msList_vla(list)))
     interpret(

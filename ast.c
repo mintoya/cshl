@@ -166,10 +166,18 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
       X(JMP_IF),  /*if a is true JMP (a,label)*/       \
       X(CALL),    /*call (functionid,(argslist...))*/  \
       X(INIT),    /*declare (sym,type?,value)*/        \
-      X(ASSIGN),  /*assign b to a(a,b)*/              \
+      X(ASSIGN),  /*assign b to a(a,b)*/               \
       X(MOVE),    /*copy(fromptr,toptr)*/              \
       X(ARG),     /*get nth arg (n)*/                  \
       X(WHERE),   /*pointer-to(sym)*/                  \
+      X(NOT),     /*  !(a)*/                           \
+      X(OR),      /*a | b  (a,b)*/                     \
+      X(AND),     /*a && b (a,b)*/                     \
+      X(XOR),     /*a ^ b  (a,b)*/                     \
+      X(BNOT),    /*  !(a)*/                           \
+      X(BOR),     /*a | b  (a,b)*/                     \
+      X(BAND),    /*a && b (a,b)*/                     \
+      X(BXOR),    /*a ^ b  (a,b)*/                     \
       X(EQUAL),   /* a == b (a,b)*/                    \
       X(MORE),    /* a > b (a,b)*/                     \
       X(LESS),    /* a < b (a,b)*/                     \
@@ -212,6 +220,8 @@ struct {
     {"/", X(DIV)},
     {"%", X(MOD)},
     {"&", X(WHERE)},
+    {"#", X(PTR)},
+    {"$", X(ARG)},
     {":", X(LABEL)},
 };
 #undef X
