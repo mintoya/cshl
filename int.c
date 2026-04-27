@@ -187,6 +187,7 @@ symbol interpret(
     astNode *node,
     mList(msHmap(symbol)) symbols
 ) {
+  // println("stack : {}", mList_len(stack));
   defer {
     assertMessage(
         !(mList_len(stack) % 8),
@@ -248,6 +249,14 @@ symbol interpret(
         return *s;
       }
     } break;
+    case builtin_TYPE: {
+      assertMessage(!node->args || msList_len(node->args) == 0);
+      static item_type justType = TU_OF((item_type, item_type_type), (item_type_type){});
+      return (symbol){
+          .is_type = 1,
+          .type = &justType,
+      };
+    } break;
     case builtin_INIT: {
       assertMessage(EQUAL_ANY(msList_len(node->args), 3, 2));
 
@@ -256,10 +265,10 @@ symbol interpret(
         assertMessage(!msHmap_get(last, node->args[0]->text), "symbol already exists in this context");
         msHmap_set(last, node->args[0]->text, interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols));
         var_ v = *msHmap_get(last, node->args[0]->text);
-        println(
-            "created : {item_type} for {slice(c8)}", v.type,
-            node->args[0]->text
-        );
+        // println(
+        //     "created : {item_type} for {slice(c8)}", v.type,
+        //     node->args[0]->text
+        // );
       } else {
         var_ type_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
         assertMessage(
@@ -423,7 +432,10 @@ symbol interpret(
 
       // push space for return type
       var_ return_type = function.type->_item_type_block.types[msList_len(function.type->_item_type_block.types) - 1];
-      usize return_size = lineup(type_size(return_type), sizeof(usize));
+      usize return_size =
+          TU_IS((item_type, item_type_type), return_type[0])
+              ? sizeof(usize) // TODO idk
+              : lineup(type_size(return_type), sizeof(usize));
       usize return_addr = mList_len(stack);
       mList_pushArr(stack, *VLAP((u8 *)NULL, return_size));
       // record stack pointer
@@ -904,14 +916,27 @@ void generate_externs(mList(msHmap(symbol)) symbols) {
       })
   );
 }
+
+fptr read_stdin(AllocatorV allocator) {
+  usize size = 0;
+  c8 *data = NULL;
+  usize capacity = 4096;
+  size = 0;
+  data = (c8 *)aAlloc(allocator, capacity);
+  usize bytes;
+  while ((bytes = fread(data + size, 1, capacity - size, stdin)) > 0) {
+    size += bytes;
+    if (size == capacity) {
+      data = (c8 *)aResize(allocator, data, capacity, (capacity * 2));
+      capacity *= 2;
+    }
+  }
+  return (fptr){size, (u8 *)data};
+}
 int main(void) {
-  u8 c[] =
-      {
-#embed "int.txt"
-      };
-  var_ list = astNode_process_file(stdAlloc, fp(c));
-  println("{msList : astNode}", list);
-  println("{msList : astNode : numbers}", list);
+  var_ list = astNode_process_file(stdAlloc, read_stdin(stdAlloc));
+  // println("{msList : astNode}", list);
+  // println("{msList : astNode : numbers}", list);
   var_ stack = mList_init(stdAlloc, u8);
 
   var_ symbols = mList_init(stdAlloc, msHmap(symbol));
