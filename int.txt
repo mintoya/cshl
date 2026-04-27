@@ -5,6 +5,7 @@ INIT(**i8,PTR(PTR(i8))),
 INIT(array , BLOCK((TYPE()),TYPE(),(
   RETURN(STRUCT(u32,PTR(ARG(0)))),
 ))),
+INIT(strArray,CALL(array,(PTR(i8)))),
 INIT(puts,BLOCK(
   (PTR(i8)),i32,
   (
@@ -46,5 +47,4 @@ MOVE(&("example"),   +(str2 , 3)),
 MOVE(&("of"),        +(str2 , 4)),
 MOVE(&("an"),        +(str2 , 5)),
 MOVE(&("args list"), +(str2 , 6)),
-CALL(main, (7,str2)),
-INIT(argsarr,CALL(array,(PTR(i8))) , 0)
+CALL(main, (7,str2))

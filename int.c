@@ -112,6 +112,15 @@ item_type *make_block(AllocatorV allocator, msList(item_type *) typething) {
   );
   return res;
 }
+typedef typeof(*((item_type_struct *)NULL)->types) struct_inner;
+item_type *make_struct(AllocatorV allocator, msList(struct_inner) typething) {
+  var_ res = item_type_newStub(allocator);
+  *res = TU_OF(
+      (item_type, item_type_struct),
+      ((item_type_struct){.types = typething})
+  );
+  return res;
+}
 bool item_type_equal(AllocatorV allocator, item_type *a, item_type *b) { // TODO actaully check the types
   var_ at = snprint(allocator, "{item_type}", a);
   defer{slice_free(allocator, at)};
@@ -265,10 +274,10 @@ symbol interpret(
         assertMessage(!msHmap_get(last, node->args[0]->text), "symbol already exists in this context");
         msHmap_set(last, node->args[0]->text, interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols));
         var_ v = *msHmap_get(last, node->args[0]->text);
-        // println(
-        //     "created : {item_type} for {slice(c8)}", v.type,
-        //     node->args[0]->text
-        // );
+        println(
+            "created : {item_type} for {slice(c8)}", v.type,
+            node->args[0]->text
+        );
       } else {
         var_ type_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
         assertMessage(
@@ -318,6 +327,77 @@ symbol interpret(
               }
           )
       };
+    } break;
+    case builtin_STRUCT: {
+      var_ field_types = msList_init(msHmap_allocator(mList_last(symbols)), struct_inner);
+      usize current_offset = 0;
+
+      if (node->args) {
+        foreach (var_ t, vla(*msList_vla(node->args))) {
+          var_ field_sym = interpret(
+              allocator,
+              stack, stack_frames,
+              temp_frames,
+              t, symbols
+          );
+          assertMessage(field_sym.is_type, "struct field must be a type");
+
+          usize f_align = type_alignment(field_sym.type);
+          if (f_align)
+            current_offset = lineup(current_offset, f_align);
+
+          msList_push(
+              msHmap_allocator(mList_last(symbols)),
+              field_types,
+              ((struct_inner){
+                  .type = field_sym.type,
+                  .offset = current_offset
+              })
+          );
+
+          current_offset += type_size(field_sym.type);
+        }
+      }
+
+      return (symbol){
+          .is_type = 1,
+          .type = make_struct(msHmap_allocator(mList_last(symbols)), field_types)
+      };
+
+    } break;
+
+    case builtin_PSTRUCT: {
+      var_ field_types = msList_init(msHmap_allocator(mList_last(symbols)), struct_inner);
+      usize current_offset = 0;
+
+      if (node->args) {
+        foreach (var_ t, vla(*msList_vla(node->args))) {
+          var_ field_sym = interpret(
+              allocator,
+              stack, stack_frames,
+              temp_frames,
+              t, symbols
+          );
+          assertMessage(field_sym.is_type, "struct field must be a type");
+
+          msList_push(
+              msHmap_allocator(mList_last(symbols)),
+              field_types,
+              ((struct_inner){
+                  .type = field_sym.type,
+                  .offset = current_offset
+              })
+          );
+
+          current_offset += type_size(field_sym.type);
+        }
+      }
+
+      return (symbol){
+          .is_type = 1,
+          .type = make_struct(msHmap_allocator(mList_last(symbols)), field_types)
+      };
+
     } break;
     case builtin_PTR: {
       assertMessage(msList_len(node->args) == 1);
@@ -391,37 +471,42 @@ symbol interpret(
         var_ s = interpret(allocator, stack, stack_frames, temp_frames, function_args->args[arg], symbols);
         var_ expected_type = function.type->_item_type_block.types[arg];
 
-        if (!item_type_equal(allocator, s.type, expected_type)) { // type coercion
-          usize expected_bytes = type_size(expected_type);
-          usize s_bytes = type_size(s.type);
+        if (TU_IS((item_type, item_type_type), expected_type[0])) {
+          if (!s.is_type)
+            assertMessage(false, "expected tyep");
+        } else {
+          if (!item_type_equal(allocator, s.type, expected_type)) { // type coercion
+            usize expected_bytes = type_size(expected_type);
+            usize s_bytes = type_size(s.type);
 
-          if (expected_bytes <= 8 && s_bytes <= 8) {
-            u64 val = 0;
-            memcpy(&val, &mList_arr(stack)[s.location], s_bytes);
+            if (expected_bytes <= 8 && s_bytes <= 8) {
+              u64 val = 0;
+              memcpy(&val, &mList_arr(stack)[s.location], s_bytes);
 
-            bool s_signed = s.type && TU_IS((item_type, item_type_sint), s.type[0]);
-            if (s_signed && s_bytes < 8) {
-              u64 shift = (8 - s_bytes) * 8;
-              val = (u64)(((i64)(val << shift)) >> shift);
+              bool s_signed = s.type && TU_IS((item_type, item_type_sint), s.type[0]);
+              if (s_signed && s_bytes < 8) {
+                u64 shift = (8 - s_bytes) * 8;
+                val = (u64)(((i64)(val << shift)) >> shift);
+              }
+
+              usize coerced_loc = mList_len(stack);
+              mList_pushArr(stack, *VLAP((u8 *)&val, expected_bytes));
+              while (mList_len(stack) % 8)
+                mList_push(stack, 0);
+
+              s = (symbol){
+                  .type = expected_type,
+                  .location = coerced_loc,
+                  .is_value = 1
+              };
+            } else {
+              assertMessage(
+                  false,
+                  "type mismatch: expected %s, got %s",
+                  snprint(stdAlloc, "{item_type}", expected_type).ptr,
+                  snprint(stdAlloc, "{item_type}", s.type).ptr
+              );
             }
-
-            usize coerced_loc = mList_len(stack);
-            mList_pushArr(stack, *VLAP((u8 *)&val, expected_bytes));
-            while (mList_len(stack) % 8)
-              mList_push(stack, 0);
-
-            s = (symbol){
-                .type = expected_type,
-                .location = coerced_loc,
-                .is_value = 1
-            };
-          } else {
-            assertMessage(
-                false,
-                "type mismatch: expected %s, got %s",
-                snprint(stdAlloc, "{item_type}", expected_type).ptr,
-                snprint(stdAlloc, "{item_type}", s.type).ptr
-            );
           }
         }
         msList_push(allocator, args, s);
@@ -510,8 +595,13 @@ symbol interpret(
                 memset(return_addr_ptr, 0, return_size);
               } else {
                 var_ retval = interpret(allocator, stack, stack_frames, temp_frames, ops[opn]->args[0], symbols);
-                assertMessage(item_type_equal(allocator, retval.type, return_type));
-                memcpy(return_addr_ptr, mList_arr(stack) + retval.location, return_size);
+                if (TU_IS((item_type, item_type_type), return_type[0])) {
+                  assertMessage(retval.is_type);
+                  return retval;
+                } else {
+                  assertMessage(item_type_equal(allocator, retval.type, return_type));
+                  memcpy(return_addr_ptr, mList_arr(stack) + retval.location, return_size);
+                }
               }
               goto endloop;
             } break;
@@ -934,7 +1024,13 @@ fptr read_stdin(AllocatorV allocator) {
   return (fptr){size, (u8 *)data};
 }
 int main(void) {
-  var_ list = astNode_process_file(stdAlloc, read_stdin(stdAlloc));
+  // var_ list = astNode_process_file(stdAlloc, read_stdin(stdAlloc));
+
+  c8 lit[] =
+      {
+#embed "int.txt"
+      };
+  var_ list = astNode_process_file(stdAlloc, fp(lit));
   // println("{msList : astNode}", list);
   // println("{msList : astNode : numbers}", list);
   var_ stack = mList_init(stdAlloc, u8);

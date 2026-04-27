@@ -58,8 +58,10 @@ TU_DEFINE(
 #pragma push_macro("min")
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
+
 static usize type_size(item_type *t);
-// static usize type_alignment(item_type *t);
+static usize type_alignment(item_type *t);
+
 static usize type_alignment(item_type *t) {
   item_type ts = *t;
   usize res = 0;
