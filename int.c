@@ -132,13 +132,6 @@ item_type *make_struct(AllocatorV allocator, msList(struct_inner) typething) {
   );
   return res;
 }
-bool item_type_equal(AllocatorV allocator, item_type *a, item_type *b) { // TODO actaully check the types
-  var_ at = snprint(allocator, "{item_type}", a);
-  defer{slice_free(allocator, at)};
-  var_ bt = snprint(allocator, "{item_type}", b);
-  defer{slice_free(allocator, bt)};
-  return fptr_eq(*(fptr *)&at, *(fptr *)&bt);
-}
 
 item_type *get_ptr_iType(item_type *t) {
   TU_MATCH(
@@ -294,7 +287,7 @@ symbol interpret(
         usize t_size = type_size(type_sym.type);
         usize loc;
 
-        if (!item_type_equal(allocator, value.type, type_sym.type)) {
+        if (!item_type_equal(value.type, type_sym.type)) {
           if ( // both unsigned, result is bigger
               TU_IS((item_type, item_type_uint), type_sym.type[0]) &&
               TU_IS((item_type, item_type_uint), value.type[0]) &&
@@ -497,7 +490,7 @@ symbol interpret(
           if (!TU_IS((symKind, sym_type), s.kind))
             assertMessage(false, "expected tyep");
         } else {
-          if (!item_type_equal(allocator, s.type, expected_type)) { // type coercion
+          if (!item_type_equal(s.type, expected_type)) { // type coercion
             usize expected_bytes = type_size(expected_type);
             usize s_bytes = type_size(s.type);
 
@@ -626,7 +619,7 @@ symbol interpret(
                   assertMessage(TU_IS((symKind, sym_type), retval.kind));
                   return retval;
                 } else {
-                  assertMessage(item_type_equal(allocator, retval.type, return_type));
+                  assertMessage(item_type_equal(retval.type, return_type));
                   memcpy(return_addr_ptr, mList_arr(stack) + retval.kind._sym_lvalue, return_size);
                 }
               }
@@ -1083,5 +1076,6 @@ int main(void) {
         node,
         symbols
     );
+  println("stack capacity : {}", mList_cap(stack));
 }
 #include "wheels/wheels.h"

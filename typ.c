@@ -4,6 +4,7 @@
 #include "wheels/mytypes.h"
 #include "wheels/print.h"
 #include "wheels/sList.h"
+#include "wheels/tagged_unions.h"
 // TODO move off asserts
 #pragma push_macro("max")
 #pragma push_macro("min")
@@ -175,3 +176,68 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
       })
   );
 });
+bool item_type_equal(item_type *a, item_type *b) {
+  if (a->tag != b->tag)
+    return false;
+
+  switch (a->tag) {
+    case TU_MK_TAG(item_type, item_type_type): {
+      return true;
+    } break;
+    case TU_MK_TAG(item_type, item_type_ptr): {
+      return item_type_equal(
+          a->_item_type_ptr.type,
+          b->_item_type_ptr.type
+      );
+    } break;
+    case TU_MK_TAG(item_type, item_type_sint): {
+      return ( // TODO idk about alignment
+          a->_item_type_sint.bitwidth == b->_item_type_sint.bitwidth
+      );
+    } break;
+    case TU_MK_TAG(item_type, item_type_uint): {
+      return ( // TODO idk about alignment
+          a->_item_type_sint.bitwidth == b->_item_type_sint.bitwidth
+      );
+    } break;
+    case TU_MK_TAG(item_type, item_type_struct): {
+      var_ alist = a->_item_type_struct.types;
+      var_ blist = b->_item_type_struct.types;
+      usize la = msList_len(alist);
+      usize lb = msList_len(blist);
+      if (la != lb)
+        return false;
+      foreach (var_ i, range(0, la)) {
+        if (alist[i].offset != blist[i].offset)
+          return false;
+        if (!item_type_equal(alist[i].type, blist[i].type))
+          return false;
+      }
+      return true;
+    } break;
+    case TU_MK_TAG(item_type, item_type_union): {
+      var_ alist = a->_item_type_union.types;
+      var_ blist = b->_item_type_union.types;
+      usize la = msList_len(alist);
+      usize lb = msList_len(blist);
+      if (la != lb)
+        return false;
+      foreach (var_ i, range(0, la))
+        if (!item_type_equal(alist[i], blist[i]))
+          return false;
+      return true;
+    } break;
+    case TU_MK_TAG(item_type, item_type_block): {
+      var_ alist = a->_item_type_block.types;
+      var_ blist = b->_item_type_block.types;
+      usize la = msList_len(alist);
+      usize lb = msList_len(blist);
+      if (la != lb)
+        return false;
+      foreach (var_ i, range(0, la))
+        if (!item_type_equal(alist[i], blist[i]))
+          return false;
+      return true;
+    } break;
+  }
+}
