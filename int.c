@@ -469,7 +469,7 @@ symbol interpret(
       var_ idx = *(usize *)(mList_arr(stack) + n.kind._sym_value);
       var_ argCount = *(usize *)(mList_arr(stack) + mList_last(stack_frames));
       assertMessage(idx < argCount, "arg oob");
-      // TODO independent function for this
+      // TODO function for this
       return ((symbol *)(mList_arr(stack) + mList_last(stack_frames) + sizeof(usize)))[idx];
     } break;
     case builtin_CALL: {
@@ -657,7 +657,77 @@ symbol interpret(
         assertMessage(false, "unknown function type ");
       }
     } break;
-    // TODO cheeck these
+    case builtin_MOVE: {
+      assertMessage(msList_len(node->args) == 2);
+
+      var_ src = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
+      var_ dst = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
+
+      assertMessage(src.type && TU_IS((item_type, item_type_ptr), src.type[0]));
+      assertMessage(dst.type && TU_IS((item_type, item_type_ptr), dst.type[0]));
+
+      usize src_off = *(usize *)(mList_arr(stack) + src.kind._sym_value);
+      usize dst_off = *(usize *)(mList_arr(stack) + dst.kind._sym_value);
+
+      usize src_size = type_size(get_ptr_iType(src.type));
+      usize dst_size = type_size(get_ptr_iType(dst.type));
+
+      assertMessage(dst_size >= src_size);
+      if (dst_size > src_size)
+        memset(mList_arr(stack) + dst_off, 0, dst_size);
+      memcpy(
+          mList_arr(stack) + dst_off,
+          mList_arr(stack) + src_off,
+          src_size
+      );
+
+      return (symbol){};
+    } break;
+    case builtin_WHERE: {
+      assertMessage(msList_len(node->args) == 1);
+
+      var_ target = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
+
+      assertMessage(TU_IS((symKind, sym_value), target.kind), "cannot take address of non-value");
+
+      usize ptr_val = target.kind._sym_value;
+
+      // TODO add concept of an rvalue
+      usize ptr_loc = mList_len(stack);
+      mList_pushArr(stack, *VLAP((u8 *)&ptr_val, sizeof(ptr_val)));
+
+      return (symbol){
+          .type = make_ptr(msHmap_allocator(mList_last(symbols)), target.type),
+          .kind = TU_OF((symKind, sym_value), ptr_loc),
+      };
+    } break;
+    case builtin_ALLOCA: {
+      assertMessage(msList_len(node->args) == 2);
+
+      var_ t = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
+      assertMessage(TU_IS((symKind, sym_type), t.kind));
+
+      var_ amt = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
+      assertMessage(TU_IS((item_type, item_type_uint), amt.type[0]));
+
+      usize count = *(usize *)(&mList_arr(stack)[amt.kind._sym_value]);
+
+      usize type_bytes = type_size(t.type);
+      usize total_bytes = count * type_bytes;
+
+      // TODO something something alignment
+      usize buffer_start = mList_len(stack);
+      mList_pushArr(stack, *VLAP((u8 *)NULL, lineup(total_bytes, 8)));
+
+      usize ptr_loc = mList_len(stack);
+      mList_pushArr(stack, *VLAP((u8 *)&buffer_start, sizeof(buffer_start)));
+
+      return (symbol){
+          .type = make_ptr(msHmap_allocator(mList_last(symbols)), t.type),
+          .kind = TU_OF((symKind, sym_value), ptr_loc),
+      };
+    } break;
+    // TODO check these
     case builtin_EQUAL:
     case builtin_MORE:
     case builtin_LESS: {
@@ -754,83 +824,6 @@ symbol interpret(
       return (symbol){
           .type = res_type,
           .kind = TU_OF((symKind, sym_value), res_loc),
-      };
-    } break;
-    case builtin_ALLOCA: {
-      assertMessage(msList_len(node->args) == 2);
-
-      var_ t = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
-      assertMessage(TU_IS((symKind, sym_type), t.kind));
-
-      var_ amt = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
-      assertMessage(TU_IS((item_type, item_type_uint), amt.type[0]));
-
-      usize count = *(usize *)(&mList_arr(stack)[amt.kind._sym_value]);
-
-      usize type_bytes = type_size(t.type);
-      usize total_bytes = count * type_bytes;
-
-      // TODO something something alignment
-      usize buffer_start = mList_len(stack);
-      mList_pushArr(stack, *VLAP((u8 *)NULL, lineup(total_bytes, 8)));
-
-      usize ptr_loc = mList_len(stack);
-      mList_pushArr(stack, *VLAP((u8 *)&buffer_start, sizeof(buffer_start)));
-
-      return (symbol){
-          .type = make_ptr(msHmap_allocator(mList_last(symbols)), t.type),
-          .kind = TU_OF((symKind, sym_value), ptr_loc),
-      };
-    } break;
-    case builtin_MOVE: {
-      assertMessage(msList_len(node->args) == 2);
-
-      var_ src_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
-      var_ dest_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
-
-      assertMessage(src_sym.type && TU_IS((item_type, item_type_ptr), src_sym.type[0]), "move source must be a pointer");
-      assertMessage(dest_sym.type && TU_IS((item_type, item_type_ptr), dest_sym.type[0]), "move destination must be a pointer");
-
-      // Dereference both to get their actual virtual addresses (stack indices)
-      usize src_ptr = *(usize *)(&mList_arr(stack)[src_sym.kind._sym_value]);
-      usize dest_ptr = *(usize *)(&mList_arr(stack)[dest_sym.kind._sym_value]);
-
-      // The size to copy is the size of the underlying type being pointed to
-      item_type *inner_type = get_ptr_iType(src_sym.type);
-      usize copy_size = type_size(inner_type);
-
-      assertMessage(dest_ptr + copy_size <= mList_len(stack), "move destination out of bounds");
-      assertMessage(src_ptr + copy_size <= mList_len(stack), "move source out of bounds");
-
-      memcpy(
-          &mList_arr(stack)[dest_ptr],
-          &mList_arr(stack)[src_ptr],
-          copy_size
-      );
-
-      return (symbol){};
-    } break;
-    case builtin_WHERE: {
-      assertMessage(msList_len(node->args) == 1);
-
-      // Evaluate the argument to get the target symbol
-      var_ target = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
-
-      // Ensure we are taking the address of a concrete variable, not a type or a raw function
-      assertMessage(!TU_IS((symKind, sym_type), target.kind), "cannot take address of a type");
-      assertMessage(!TU_IS((symKind, sym_function), target.kind), "taking address of block/function unsupported here");
-
-      // The target's location (stack index) is its virtual memory address
-      usize ptr_val = target.kind._sym_value;
-
-      // Push this pointer value onto the stack
-      usize ptr_loc = mList_len(stack);
-      mList_pushArr(stack, *VLAP((u8 *)&ptr_val, sizeof(ptr_val)));
-
-      // Return a symbol that represents a pointer to the target's type
-      return (symbol){
-          .type = make_ptr(msHmap_allocator(mList_last(symbols)), target.type),
-          .kind = TU_OF((symKind, sym_value), ptr_loc),
       };
     } break;
     case builtin_ADD:
@@ -957,44 +950,37 @@ symbol interpret(
     case builtin_ASSIGN: {
       assertMessage(msList_len(node->args) == 2);
 
-      // Resolve the destination symbol and the source value
-      var_ dest_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
+      var_ dst_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
       var_ src_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
 
-      assertMessage(!TU_IS((symKind, sym_type), dest_sym.kind) && !TU_IS((symKind, sym_type), src_sym.kind), "cannot assign to/from a type");
-      assertMessage(!TU_IS((symKind, sym_function), dest_sym.kind), "cannot assign to a function block");
+      assertMessage(TU_IS((symKind, sym_value), dst_sym.kind), "cant assign non-values");
+      assertMessage(TU_IS((symKind, sym_value), src_sym.kind), "cant assign non-values");
 
-      usize dest_bytes = type_size(dest_sym.type);
-      usize src_bytes = type_size(src_sym.type);
+      usize dst_size = type_size(dst_sym.type);
+      usize src_size = type_size(src_sym.type);
 
-      // Handle scalar assignments (<= 8 bytes) with potential sign extension and size casting
-      if (dest_bytes <= 8 && src_bytes <= 8) {
+      // TODO i really really need some way to coerce types
+      if (dst_size <= 8 && src_size <= 8) {
         u64 val = 0;
-        memcpy(&val, &mList_arr(stack)[src_sym.kind._sym_value], src_bytes);
+        memcpy(&val, &mList_arr(stack)[src_sym.kind._sym_value], src_size);
 
-        // Sign extend if source is a signed integer
+        // sign extend
         bool src_signed = src_sym.type && TU_IS((item_type, item_type_sint), src_sym.type[0]);
-        if (src_signed && src_bytes < 8) {
-          u64 shift = (8 - src_bytes) * 8;
+        if (src_signed && src_size < 8) {
+          u64 shift = (8 - src_size) * 8;
           val = (u64)(((i64)(val << shift)) >> shift);
         }
 
-        // Write the possibly truncated or expanded bytes to the destination
-        memcpy(&mList_arr(stack)[dest_sym.kind._sym_value], &val, dest_bytes);
+        memcpy(&mList_arr(stack)[dst_sym.kind._sym_value], &val, dst_size);
       } else {
-        // Raw memory copy fallback for larger types (structs, arrays)
-        usize copy_size = dest_bytes < src_bytes ? dest_bytes : src_bytes;
+        usize copy_size = dst_size < src_size ? dst_size : src_size;
         memcpy(
-            &mList_arr(stack)[dest_sym.kind._sym_value],
+            &mList_arr(stack)[dst_sym.kind._sym_value],
             &mList_arr(stack)[src_sym.kind._sym_value],
             copy_size
         );
       }
-      return dest_sym;
-    } break;
-    case builtin_RETURN: {
-      assertMessage(msList_len(node->args) == 1);
-      return interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
+      return (symbol){};
     } break;
     default: {
       assertMessage(false, "unimplemented %s", builtins[node->op]);
@@ -1004,6 +990,7 @@ symbol interpret(
 #include <stdio.h>
 
 // responsible for writing to the return adress
+// TODO ffi
 symbol extern_putc(usize return_addr, mList(u8) stack, mList(usize) stack_frames) {
   usize frame_start = mList_last(stack_frames);
 
