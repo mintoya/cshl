@@ -29,26 +29,11 @@ INIT(main,BLOCK(
         RETURN(0),
       )
     )),
-    INIT(puts_recursive,BLOCK(
-      (PTR(i8)),i32, (
-        INIT(c,i8,0),
-        MOVE($(0),&(c)),
-        JMP_IF(==(c,0),end),
-          CALL(putc,(c)),
-          CALL(puts_recursive,(+($(0),1))),
-        JMP(skip),
-        :(end),
-          CALL(putc,(10)),
-        :(skip),
-        RETURN(0),
-      )
-    )),
     INIT(i,i32,0),
     INIT(s,PTR(i8),0),
     :(loop),
     JMP_IF(==( i , $(0)) , end),
       MOVE(+($(1) , i) , &(s)),
-      CALL(puts_recursive ,(s)),
       CALL(puts,(s)),
       =(i,+(i,1)),
     JMP(loop),

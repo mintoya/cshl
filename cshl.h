@@ -136,14 +136,16 @@ typedef astNode *sym_function;
 typedef struct {} sym_type;
 typedef struct {} sym_none;
 // clang-format on
-typedef usize sym_value; // location on the stack
+typedef usize sym_lvalue; // location on the stack
+typedef fptr sym_rvalue;  // entire value
 TU_DEFINE(
     (symKind, u8),
     sym_none,
     sym_function,
     sym_extern,
     sym_type,
-    sym_value,
+    sym_lvalue,
+    sym_rvalue,
 );
 static_assert(!TU_MK_TAG(symKind, sym_none)); // just (symbol){} needs to be none
 

@@ -15,7 +15,7 @@ REGISTER_PRINTER(symbol, {
   TU_MATCH(
       (symKind, in.kind),
 
-      (sym_value, /*   */ { PUTS("value"); }),
+      (sym_lvalue, /*   */ { PUTS("value"); }),
       (sym_function, /**/ { PUTS("function"); }),
       (sym_extern, /*  */ { PUTS("extern"); }),
       (sym_type, /*    */ { PUTS("type"); }),
@@ -230,7 +230,7 @@ symbol interpret(
                     .issigned = 0,
                 }
             ),
-            .kind = TU_OF((symKind, sym_value), res)
+            .kind = TU_OF((symKind, sym_lvalue), res)
         };
       } else if (node->text.ptr[0] == '"') {
         assertMessage(node->text.ptr[node->text.len - 1] == '"');
@@ -245,7 +245,7 @@ symbol interpret(
         mList_pushArr(stack, *VLAP((u8 *)&res, sizeof(res)));
 
         return (symbol){
-            .kind = TU_OF((symKind, sym_value), resp),
+            .kind = TU_OF((symKind, sym_lvalue), resp),
             .type = make_ptr(
                 msHmap_allocator(mList_last(symbols)),
                 get_itype(
@@ -301,16 +301,16 @@ symbol interpret(
               TU_IS((item_type, item_type_uint), value.type[0]) &&
               type_size(type_sym.type) <= type_size(value.type)
           ) {
-            loc = value.kind._sym_value;
+            loc = value.kind._sym_lvalue;
           } else { // 0 for all types
             assertMessage(TU_IS((item_type, item_type_uint), value.type[0]));
-            assertMessage(TU_IS((symKind, sym_value), value.kind));
-            assertMessage(fptr_isEmpty((fptr){t_size, mList_arr(stack) + value.kind._sym_value}));
+            assertMessage(TU_IS((symKind, sym_lvalue), value.kind));
+            assertMessage(fptr_isEmpty((fptr){t_size, mList_arr(stack) + value.kind._sym_lvalue}));
             loc = mList_len(stack);
             mList_pushArr(stack, *VLAP((u8 *)NULL, t_size));
           }
         } else { // value is same type
-          loc = value.kind._sym_value;
+          loc = value.kind._sym_lvalue;
         }
 
         var_ last = mList_arr(symbols)[mList_len(symbols) - 1];
@@ -320,7 +320,7 @@ symbol interpret(
             last,
             node->args[0]->text,
             ((symbol){
-                .kind = TU_OF((symKind, sym_value), loc),
+                .kind = TU_OF((symKind, sym_lvalue), loc),
                 .type = type_sym.type,
             })
         );
@@ -464,9 +464,9 @@ symbol interpret(
       var_ n = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
 
       assertMessage(TU_IS((item_type, item_type_uint), (n.type[0])));
-      assertMessage(TU_IS((symKind, sym_value), n.kind));
+      assertMessage(TU_IS((symKind, sym_lvalue), n.kind));
 
-      var_ idx = *(usize *)(mList_arr(stack) + n.kind._sym_value);
+      var_ idx = *(usize *)(mList_arr(stack) + n.kind._sym_lvalue);
       var_ argCount = *(usize *)(mList_arr(stack) + mList_last(stack_frames));
       assertMessage(idx < argCount, "arg oob");
       // TODO function for this
@@ -503,7 +503,7 @@ symbol interpret(
 
             if (expected_bytes <= 8 && s_bytes <= 8) {
               u64 val = 0;
-              memcpy(&val, &mList_arr(stack)[s.kind._sym_value], s_bytes);
+              memcpy(&val, &mList_arr(stack)[s.kind._sym_lvalue], s_bytes);
 
               bool s_signed = s.type && TU_IS((item_type, item_type_sint), s.type[0]);
               if (s_signed && s_bytes < 8) {
@@ -518,7 +518,7 @@ symbol interpret(
 
               s = (symbol){
                   .type = expected_type,
-                  .kind = TU_OF((symKind, sym_value), coerced_loc),
+                  .kind = TU_OF((symKind, sym_lvalue), coerced_loc),
               };
             } else {
               assertMessage(
@@ -599,14 +599,14 @@ symbol interpret(
               else {
                 var_ condition = interpret(allocator, stack, stack_frames, temp_frames, ops[opn]->args[0], symbols);
                 assertMessage(
-                    TU_IS((symKind, sym_value), condition.kind),
+                    TU_IS((symKind, sym_lvalue), condition.kind),
                     "%s", snprint(stdAlloc, "condition is a {symbol}", condition).ptr
                 );
 
                 usize len = type_size(condition.type);
                 if (fptr_isEmpty((fptr){
                         len,
-                        mList_arr(stack) + condition.kind._sym_value,
+                        mList_arr(stack) + condition.kind._sym_lvalue,
                     }))
                   continue;
                 else
@@ -627,7 +627,7 @@ symbol interpret(
                   return retval;
                 } else {
                   assertMessage(item_type_equal(allocator, retval.type, return_type));
-                  memcpy(return_addr_ptr, mList_arr(stack) + retval.kind._sym_value, return_size);
+                  memcpy(return_addr_ptr, mList_arr(stack) + retval.kind._sym_lvalue, return_size);
                 }
               }
               goto endloop;
@@ -647,7 +647,7 @@ symbol interpret(
           } else {
             return (symbol){
                 .type = return_type,
-                .kind = TU_OF((symKind, sym_value), return_addr),
+                .kind = TU_OF((symKind, sym_lvalue), return_addr),
             };
           }
         }
@@ -666,8 +666,8 @@ symbol interpret(
       assertMessage(src.type && TU_IS((item_type, item_type_ptr), src.type[0]));
       assertMessage(dst.type && TU_IS((item_type, item_type_ptr), dst.type[0]));
 
-      usize src_off = *(usize *)(mList_arr(stack) + src.kind._sym_value);
-      usize dst_off = *(usize *)(mList_arr(stack) + dst.kind._sym_value);
+      usize src_off = *(usize *)(mList_arr(stack) + src.kind._sym_lvalue);
+      usize dst_off = *(usize *)(mList_arr(stack) + dst.kind._sym_lvalue);
 
       usize src_size = type_size(get_ptr_iType(src.type));
       usize dst_size = type_size(get_ptr_iType(dst.type));
@@ -688,9 +688,9 @@ symbol interpret(
 
       var_ target = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
 
-      assertMessage(TU_IS((symKind, sym_value), target.kind), "cannot take address of non-value");
+      assertMessage(TU_IS((symKind, sym_lvalue), target.kind), "cannot take address of non-value");
 
-      usize ptr_val = target.kind._sym_value;
+      usize ptr_val = target.kind._sym_lvalue;
 
       // TODO add concept of an rvalue
       usize ptr_loc = mList_len(stack);
@@ -698,7 +698,7 @@ symbol interpret(
 
       return (symbol){
           .type = make_ptr(msHmap_allocator(mList_last(symbols)), target.type),
-          .kind = TU_OF((symKind, sym_value), ptr_loc),
+          .kind = TU_OF((symKind, sym_lvalue), ptr_loc),
       };
     } break;
     case builtin_ALLOCA: {
@@ -710,7 +710,7 @@ symbol interpret(
       var_ amt = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
       assertMessage(TU_IS((item_type, item_type_uint), amt.type[0]));
 
-      usize count = *(usize *)(&mList_arr(stack)[amt.kind._sym_value]);
+      usize count = *(usize *)(&mList_arr(stack)[amt.kind._sym_lvalue]);
 
       usize type_bytes = type_size(t.type);
       usize total_bytes = count * type_bytes;
@@ -724,7 +724,7 @@ symbol interpret(
 
       return (symbol){
           .type = make_ptr(msHmap_allocator(mList_last(symbols)), t.type),
-          .kind = TU_OF((symKind, sym_value), ptr_loc),
+          .kind = TU_OF((symKind, sym_lvalue), ptr_loc),
       };
     } break;
     // TODO check these
@@ -747,10 +747,10 @@ symbol interpret(
       usize b_bytes = type_size(tb);
 
       u64 a_val = 0;
-      memcpy(&a_val, &mList_arr(stack)[a_sym.kind._sym_value], a_bytes);
+      memcpy(&a_val, &mList_arr(stack)[a_sym.kind._sym_lvalue], a_bytes);
 
       u64 b_val = 0;
-      memcpy(&b_val, &mList_arr(stack)[b_sym.kind._sym_value], b_bytes);
+      memcpy(&b_val, &mList_arr(stack)[b_sym.kind._sym_lvalue], b_bytes);
 
       bool a_signed = false, b_signed = false;
 
@@ -823,7 +823,7 @@ symbol interpret(
 
       return (symbol){
           .type = res_type,
-          .kind = TU_OF((symKind, sym_value), res_loc),
+          .kind = TU_OF((symKind, sym_lvalue), res_loc),
       };
     } break;
     case builtin_ADD:
@@ -856,10 +856,10 @@ symbol interpret(
       usize b_bytes = type_size(tb);
 
       u64 a_val = 0;
-      memcpy(&a_val, &mList_arr(stack)[a_sym.kind._sym_value], a_bytes);
+      memcpy(&a_val, &mList_arr(stack)[a_sym.kind._sym_lvalue], a_bytes);
 
       u64 b_val = 0;
-      memcpy(&b_val, &mList_arr(stack)[b_sym.kind._sym_value], b_bytes);
+      memcpy(&b_val, &mList_arr(stack)[b_sym.kind._sym_lvalue], b_bytes);
 
       bool a_signed = false, b_signed = false;
       usize a_bits = 0, b_bits = 0;
@@ -944,7 +944,7 @@ symbol interpret(
         mList_push(stack, 0);
       return (symbol){
           .type = res_type,
-          .kind = TU_OF((symKind, sym_value), res_loc),
+          .kind = TU_OF((symKind, sym_lvalue), res_loc),
       };
     } break;
     case builtin_ASSIGN: {
@@ -953,8 +953,8 @@ symbol interpret(
       var_ dst_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[0], symbols);
       var_ src_sym = interpret(allocator, stack, stack_frames, temp_frames, node->args[1], symbols);
 
-      assertMessage(TU_IS((symKind, sym_value), dst_sym.kind), "cant assign non-values");
-      assertMessage(TU_IS((symKind, sym_value), src_sym.kind), "cant assign non-values");
+      assertMessage(TU_IS((symKind, sym_lvalue), dst_sym.kind), "cant assign non-values");
+      assertMessage(TU_IS((symKind, sym_lvalue), src_sym.kind), "cant assign non-values");
 
       usize dst_size = type_size(dst_sym.type);
       usize src_size = type_size(src_sym.type);
@@ -962,7 +962,7 @@ symbol interpret(
       // TODO i really really need some way to coerce types
       if (dst_size <= 8 && src_size <= 8) {
         u64 val = 0;
-        memcpy(&val, &mList_arr(stack)[src_sym.kind._sym_value], src_size);
+        memcpy(&val, &mList_arr(stack)[src_sym.kind._sym_lvalue], src_size);
 
         // sign extend
         bool src_signed = src_sym.type && TU_IS((item_type, item_type_sint), src_sym.type[0]);
@@ -971,12 +971,12 @@ symbol interpret(
           val = (u64)(((i64)(val << shift)) >> shift);
         }
 
-        memcpy(&mList_arr(stack)[dst_sym.kind._sym_value], &val, dst_size);
+        memcpy(&mList_arr(stack)[dst_sym.kind._sym_lvalue], &val, dst_size);
       } else {
         usize copy_size = dst_size < src_size ? dst_size : src_size;
         memcpy(
-            &mList_arr(stack)[dst_sym.kind._sym_value],
-            &mList_arr(stack)[src_sym.kind._sym_value],
+            &mList_arr(stack)[dst_sym.kind._sym_lvalue],
+            &mList_arr(stack)[src_sym.kind._sym_lvalue],
             copy_size
         );
       }
@@ -998,14 +998,14 @@ symbol extern_putc(usize return_addr, mList(u8) stack, mList(usize) stack_frames
   assertMessage(acount == 1);
 
   symbol *args = (symbol *)(mList_arr(stack) + frame_start + sizeof(usize));
-  char c = *(char *)(mList_arr(stack) + args->kind._sym_value);
+  char c = *(char *)(mList_arr(stack) + args->kind._sym_lvalue);
   // println("input : {item_type}", args[0].type);
   // println("extern putc : {i8} , {c8}", c, c);
   // i32 result = 1;
   i32 result = putchar(c);
   *(i32 *)(mList_arr(stack) + return_addr) = result;
   return (symbol){
-      .kind = TU_OF((symKind, sym_value), return_addr),
+      .kind = TU_OF((symKind, sym_lvalue), return_addr),
       .type = get_itype((struct intHandle){
           .bitcount = 32,
           .issigned = 1,
