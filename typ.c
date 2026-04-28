@@ -1,58 +1,9 @@
+#include "cshl.h"
 #include "wheels/bigint.h"
 #include "wheels/macros.h"
 #include "wheels/mytypes.h"
 #include "wheels/print.h"
 #include "wheels/sList.h"
-#include "wheels/tagged_unions.h"
-typedef struct item_type item_type;
-
-typedef struct item_type_type {
-} item_type_type;
-typedef struct item_type_sint {
-  usize bitwidth;
-  usize alignment;
-} item_type_sint;
-typedef struct item_type_uint {
-  usize bitwidth;
-  usize alignment;
-} item_type_uint;
-// typedef struct item_type_bint { // will parse integers with this
-//   struct {
-//     usize count;
-//     u8 bits[/*count*/];
-//   } *b; // bits pointer is soemwhat convertable to bigint
-// } item_type_bint;
-typedef struct item_type_ptr {
-  item_type *type; // not this one
-  usize alignment;
-} item_type_ptr;
-typedef struct item_type_struct {
-  struct {
-    item_type *type;
-    usize offset;
-  } *types; // msList
-  usize alignment;
-} item_type_struct;
-typedef struct item_type_union {
-  item_type **types;
-  usize alignment;
-} item_type_union;
-
-typedef struct item_type_block {
-  item_type **types; // only one return type,
-                     // last item is return type
-} item_type_block;
-
-TU_DEFINE(
-    (item_type, u8),
-    item_type_type,
-    item_type_ptr,
-    item_type_sint,
-    item_type_uint,
-    item_type_struct,
-    item_type_union,
-    item_type_block,
-);
 // TODO move off asserts
 #pragma push_macro("max")
 #pragma push_macro("min")

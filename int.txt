@@ -1,37 +1,55 @@
 INIT(i32,SINT(32)),
 INIT(u32,UINT(32)),
+INIT(u64,UINT(64)),
 INIT(i8,SINT(8)),
+
 INIT(**i8,PTR(PTR(i8))),
 INIT(array , BLOCK((TYPE()),TYPE(),(
-  RETURN(STRUCT(u32,PTR(ARG(0)))),
+  RETURN(STRUCT(u32,PTR($(0)))),
 ))),
+
 INIT(strArray,CALL(array,(PTR(i8)))),
-INIT(puts,BLOCK(
-  (PTR(i8)),i32,
-  (
-    INIT(s,PTR(i8),0),
-    MOVE(&($(0)),&(s)),
-    INIT(c,i8,0),
-    :(loop),
-    MOVE(s,&(c)),
-    =(s,+(s,1)),
-    JMP_IF(==(c,0),end),
-    CALL(putc,(c)),
-    JMP(loop),
-    :(end),
-    CALL(putc,(10)),
-    RETURN(0),
-  )
-)),
+
 INIT(main,BLOCK(
   (i32,**i8), i32,
   (
+    INIT(puts,BLOCK(
+      (PTR(i8)),i32, (
+        INIT(s,PTR(i8),0),
+        MOVE(&($(0)),&(s)),
+        INIT(c,i8,0),
+        :(loop),
+        MOVE(s,&(c)),
+        =(s,+(s,1)),
+        JMP_IF(==(c,0),end),
+        CALL(putc,(c)),
+        JMP(loop),
+        :(end),
+        CALL(putc,(10)),
+        RETURN(0),
+      )
+    )),
+    INIT(puts_recursive,BLOCK(
+      (PTR(i8)),i32, (
+        INIT(c,i8,0),
+        MOVE($(0),&(c)),
+        JMP_IF(==(c,0),end),
+          CALL(putc,(c)),
+          CALL(puts_recursive,(+($(0),1))),
+        JMP(skip),
+        :(end),
+          CALL(putc,(10)),
+        :(skip),
+        RETURN(0),
+      )
+    )),
     INIT(i,i32,0),
     INIT(s,PTR(i8),0),
     :(loop),
     JMP_IF(==( i , $(0)) , end),
       MOVE(+($(1) , i) , &(s)),
-      CALL(puts ,(s)),
+      CALL(puts_recursive ,(s)),
+      CALL(puts,(s)),
       =(i,+(i,1)),
     JMP(loop),
     :(end),

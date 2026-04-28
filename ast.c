@@ -1,13 +1,10 @@
+#include "cshl.h"
 #include "wheels/bigint.h"
 #include "wheels/fptr.h"
 #include "wheels/macros.h"
 #include "wheels/mytypes.h"
 #include "wheels/print.h"
 #include "wheels/shmap.h"
-
-//
-// types
-//
 
 //
 // text processing
@@ -145,65 +142,12 @@ static msList(fptr) fp_split_comma(AllocatorV allocator, fptr in) {
   return res;
 }
 
-//
-// 'ast'
-//
-
-#define OPERATIONS_X                                   \
-  X(NONE),                                             \
-      X(SINT),    /*signed integer (bits)*/            \
-      X(UINT),    /*unsigned integer(bits)*/           \
-      X(STRUCT),  /*struct(types)*/                    \
-      X(PSTRUCT), /*packed struct(types)*/             \
-      X(UNION),   /*union(types)*/                     \
-      X(PTR),     /*pointer to (type)*/                \
-      X(BLOCK),   /*(inputs,output,instructions)*/     \
-      X(BEGINS),  /*record custom stack pointer*/      \
-      X(ENDS),    /*set last custom stack pointer*/    \
-      X(RETURN),  /*return (value)*/                   \
-      X(LABEL),   /*create(label)*/                    \
-      X(JMP),     /*jump to (label)*/                  \
-      X(JMP_IF),  /*if a is true JMP (a,label)*/       \
-      X(CALL),    /*call (functionid,(argslist...))*/  \
-      X(INIT),    /*declare (sym,type?,value)*/        \
-      X(ASSIGN),  /*assign b to a(a,b)*/               \
-      X(MOVE),    /*copy(fromptr,toptr)*/              \
-      X(ARG),     /*get nth arg (n)*/                  \
-      X(WHERE),   /*pointer-to(sym)*/                  \
-      X(NOT),     /*  !(a)*/                           \
-      X(OR),      /*a | b  (a,b)*/                     \
-      X(AND),     /*a && b (a,b)*/                     \
-      X(XOR),     /*a ^ b  (a,b)*/                     \
-      X(BNOT),    /*  !(a)*/                           \
-      X(BOR),     /*a | b  (a,b)*/                     \
-      X(BAND),    /*a && b (a,b)*/                     \
-      X(BXOR),    /*a ^ b  (a,b)*/                     \
-      X(EQUAL),   /* a == b (a,b)*/                    \
-      X(MORE),    /* a > b (a,b)*/                     \
-      X(LESS),    /* a < b (a,b)*/                     \
-      X(ADD),     /*add b to sym(b,sym)*/              \
-      X(SUB),     /*subtract b from sym(sym,b)*/       \
-      X(MUL),     /*multiply a by b,then set a (a,b)*/ \
-      X(DIV),     /*divide a by b , then set a (a,b)*/ \
-      X(SHR),     /*shift a by b (a , b)*/             \
-      X(SHL),     /*shift a by b (a , b)*/             \
-      X(MOD),     /*mod a by b , then set a (a,b)*/    \
-      X(TYPE),    /*type*/                             \
-      X(SIZEOF),  /*size of t (t)*/                    \
-      X(ALIGNOF), /*align of t (t)*/                   \
-      X(OFSOF),   /*offset fo n'th st item (st,n)*/    \
-      X(ALLOCA),  /*push n of type onto the stack(type,n)*/
-// begins and ends must be within the current function, equivalent of {} in c, jumping across ends must cause ends to be triggered  if after begins
-
-#define X(n) #n
+#define X(n) OP_NAME(n)
 char builtins[][8] = {
     OPERATIONS_X
 };
 #undef X
-#define X(n) builtin_##n
-enum builtin_OP {
-  OPERATIONS_X
-};
+#define X(n) OP_ENUM(n)
 struct {
   char alternate[8];
   enum builtin_OP builtin;
@@ -226,20 +170,15 @@ struct {
     {":", X(LABEL)},
 };
 #undef X
-typedef struct astNode {
-  fptr text;
-  usize op; // index of builtin
-  struct astNode **args;
-} astNode;
 
-static astNode *astNode_expand(AllocatorV allocator, usize op, fptr builtin, fptr text) {
+static astNode *astNode_expand(AllocatorV allocator, enum builtin_OP op, fptr builtin, fptr text) {
 
-  static msHmap(usize) name_to_idx = NULL;
+  static msHmap(enum builtin_OP) name_to_idx = NULL;
 
   if (!name_to_idx) {
-    name_to_idx = msHmap_init(allocator, usize);
+    name_to_idx = msHmap_init(allocator, enum builtin_OP);
     foreach (int i, range(1, countof(builtins)))
-      msHmap_set(name_to_idx, builtins[i], i);
+      msHmap_set(name_to_idx, builtins[i], (enum builtin_OP)i);
     foreach (var_ alt, vla(builtin_alt))
       msHmap_set(name_to_idx, alt.alternate, alt.builtin);
   }
@@ -280,13 +219,13 @@ static astNode *astnode_expand2(AllocatorV allocator, fptr f) {
   if (b.fun.len) {
     var_ split = fp_split_comma(allocator, b.arg);
 
-    astNode *node = astNode_expand(allocator, 0, b.fun, b.fun);
+    astNode *node = astNode_expand(allocator, OP_ENUM(NONE), b.fun, b.fun);
     foreach (var_ v, vla(*msList_vla(split)))
       msList_push(allocator, node->args, astnode_expand2(allocator, v));
     return node;
   } else if (b.arg.len) { // just parenthesis
     astNode *node = aCreate(allocator, astNode);
-    node->op = builtin_NONE;
+    node->op = OP_ENUM(NONE);
     node->text = f;
     node->args = msList_init(allocator, astNode *);
     var_ split = fp_split_comma(allocator, b.arg);
@@ -295,7 +234,7 @@ static astNode *astnode_expand2(AllocatorV allocator, fptr f) {
     return node;
   } else { // id
     astNode *node = aCreate(allocator, astNode);
-    node->op = builtin_NONE;
+    node->op = OP_ENUM(NONE);
     node->text = f;
     node->args = NULL;
     return node;
@@ -303,7 +242,7 @@ static astNode *astnode_expand2(AllocatorV allocator, fptr f) {
 }
 
 static astNode *astNode_recurse(AllocatorV allocator, fptr call, msList(fptr) args) {
-  astNode *node = astNode_expand(allocator, 0, call, call);
+  astNode *node = astNode_expand(allocator, OP_ENUM(NONE), call, call);
 
   foreach (var_ v, vla(*msList_vla(args)))
     msList_push(allocator, node->args, astnode_expand2(allocator, v));
