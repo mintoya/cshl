@@ -250,42 +250,6 @@ static astNode *astNode_recurse(AllocatorV allocator, fptr call, msList(fptr) ar
   return node;
 }
 
-REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
-  args = printer_arg_trim(args);
-  bool usenumbers = false;
-
-  if (fptr_eq(args, fp("numbers")))
-    usenumbers = true;
-
-  if (!in) {
-    PUTS("NULL");
-  } else if (in->op) {
-    if (usenumbers)
-      USETYPEPRINTER(usize, in->op);
-    else
-      USENAMEDPRINTER("cstr", (char *)builtins[in->op]);
-    PUTS("(");
-    if (in->args) {
-      for (usize i = 0; i < msList_len(in->args); i++) {
-        if (i > 0)
-          PUTS(", ");
-        USENAMEDPRINTER_WA("astNode", args, in->args[i]);
-      }
-    }
-    PUTS(")");
-  } else if (in->args) {
-    PUTS("(");
-    for (usize i = 0; i < msList_len(in->args); i++) {
-      if (i > 0)
-        PUTS(", ");
-      USENAMEDPRINTER_WA("astNode", args, in->args[i]);
-    }
-    PUTS(")");
-  } else {
-    USENAMEDPRINTER("slice(c8)", in->text);
-  }
-});
-
 static msList(astNode *) astNode_process_file(AllocatorV allocator, fptr s) {
   var_ fps = fp_split_comma(allocator, s);
   msList(astNode *) res = msList_init(allocator, astNode *, msList_len(fps));

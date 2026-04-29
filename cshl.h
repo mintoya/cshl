@@ -123,6 +123,19 @@ TU_DEFINE(
     item_type_union,
     item_type_block,
 );
+  #define ITYPE_OF(item)                                                                                                         \
+    _Generic(                                                                                                                    \
+        (REF(typeof(item), item)),                                                                                               \
+        item_type_type * /*  */: TU_OF((item_type, item_type_type), /*  */ (*(item_type_type *)/*  */ REF(typeof(item), item))), \
+        item_type_ptr * /*   */: TU_OF((item_type, item_type_ptr), /*   */ (*(item_type_ptr *)/*   */ REF(typeof(item), item))), \
+        item_type_sint * /*  */: TU_OF((item_type, item_type_sint), /*  */ (*(item_type_sint *)/*  */ REF(typeof(item), item))), \
+        item_type_uint * /*  */: TU_OF((item_type, item_type_uint), /*  */ (*(item_type_uint *)/*  */ REF(typeof(item), item))), \
+        item_type_struct * /**/: TU_OF((item_type, item_type_struct), /**/ (*(item_type_struct *)/**/ REF(typeof(item), item))), \
+        item_type_union * /* */: TU_OF((item_type, item_type_union), /* */ (*(item_type_union *)/* */ REF(typeof(item), item))), \
+        item_type_block * /* */: TU_OF((item_type, item_type_block), /* */ (*(item_type_block *)/* */ REF(typeof(item), item)))  \
+    )
+
+  #define ITYPE_IS(type, s) TU_IS((item_type, item_type_##type), s)
 
 //
 // interpreter
@@ -138,6 +151,7 @@ typedef struct {} sym_none;
 // clang-format on
 typedef usize sym_lvalue; // location on the stack
 typedef fptr sym_rvalue;  // entire value
+
 TU_DEFINE(
     (symKind, u8),
     sym_none,
@@ -147,6 +161,19 @@ TU_DEFINE(
     sym_lvalue,
     sym_rvalue,
 );
+  #define SYM_OF(item)                                                                                             \
+    _Generic(                                                                                                      \
+        (REF(typeof(item), item)),                                                                                 \
+        sym_none * /*    */: TU_OF((symKind, sym_none), /*    */ (*(sym_none *)/*    */ REF(typeof(item), item))), \
+        sym_function * /**/: TU_OF((symKind, sym_function), /**/ (*(sym_function *)/**/ REF(typeof(item), item))), \
+        sym_extern * /*  */: TU_OF((symKind, sym_extern), /*  */ (*(sym_extern *)/*  */ REF(typeof(item), item))), \
+        sym_type * /*    */: TU_OF((symKind, sym_type), /*    */ (*(sym_type *)/*    */ REF(typeof(item), item))), \
+        sym_lvalue * /*  */: TU_OF((symKind, sym_lvalue), /*  */ (*(sym_lvalue *)/*  */ REF(typeof(item), item))), \
+        sym_rvalue * /*  */: TU_OF((symKind, sym_rvalue), /*  */ (*(sym_rvalue *)/*  */ REF(typeof(item), item)))  \
+    )
+  #define SYM_IS(type, s) TU_IS((symKind, sym_##type), s)
+  #include "wheels/print.h"
+
 static_assert(!TU_MK_TAG(symKind, sym_none)); // just (symbol){} needs to be none
 
 typedef struct symbol {
@@ -154,4 +181,65 @@ typedef struct symbol {
   symKind kind;
 } symbol;
 
+REGISTER_PRINTER(symbol, {
+  PUTS("{");
+  TU_MATCH(
+      (symKind, in.kind),
+
+      (sym_lvalue, /*  */ { PUTS("value"); }),
+      (sym_rvalue, /*  */ { PUTS("value"); }),
+      (sym_function, /**/ { PUTS("function"); }),
+      (sym_extern, /*  */ { PUTS("extern"); }),
+      (sym_type, /*    */ { PUTS("type"); }),
+
+      (sym_none, /*    */ { PUTS("none"); }),
+  );
+  PUTS(",type : ");
+  if (in.type) {
+    USENAMEDPRINTER("item_type", in.type);
+  } else {
+    PUTS("none");
+  }
+  PUTS("}");
+});
+  #define X(...) #__VA_ARGS__
+REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
+  args = printer_arg_trim(args);
+  bool usenumbers = false;
+
+  char builtins[][8] = {
+      OPERATIONS_X
+  };
+  if (fptr_eq(args, fp("numbers")))
+    usenumbers = true;
+
+  if (!in) {
+    PUTS("NULL");
+  } else if (in->op) {
+    if (usenumbers)
+      USETYPEPRINTER(usize, in->op);
+    else
+      USENAMEDPRINTER("cstr", (char *)builtins[in->op]);
+    PUTS("(");
+    if (in->args) {
+      for (usize i = 0; i < msList_len(in->args); i++) {
+        if (i > 0)
+          PUTS(", ");
+        USENAMEDPRINTER_WA("astNode", args, in->args[i]);
+      }
+    }
+    PUTS(")");
+  } else if (in->args) {
+    PUTS("(");
+    for (usize i = 0; i < msList_len(in->args); i++) {
+      if (i > 0)
+        PUTS(", ");
+      USENAMEDPRINTER_WA("astNode", args, in->args[i]);
+    }
+    PUTS(")");
+  } else {
+    USENAMEDPRINTER("slice(c8)", in->text);
+  }
+});
+  #undef X
 #endif
