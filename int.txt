@@ -5,10 +5,22 @@ INIT(i8,SINT(8)),
 
 INIT(**i8,PTR(PTR(i8))),
 INIT(array , BLOCK((TYPE()),TYPE(),(
-  RETURN(STRUCT(u32,PTR($(0)))),
+  RETURN(STRUCT(u64,PTR($(0)))),
 ))),
 
-INIT(strArray,CALL(array,(PTR(i8)))),
+INIT(strc_r,CALL(array ,(i8))),
+
+INIT(strc , BLOCK(
+  (PTR(i8)) , strc_r , (
+    INIT(res , strc_r , 0),
+    INIT(ptr,PTR(i8),&(res)),
+    INIT(sizepart,PTR(u64)    ,+( ptr , 0)) ,
+    INIT( ptrpart,PTR(PTR(i8)),+( ptr , 8)) ,
+    RETURN(res),
+  )
+)),
+
+CALL(strc , ("hello")),
 
 INIT(main,BLOCK(
   (i32,**i8), i32,
@@ -44,12 +56,10 @@ INIT(main,BLOCK(
 
 INIT(str2 , ALLOCA(PTR(i8),7)),
 
-MOVE(&("this"),      +(str2 , 0)),
-MOVE(&("is"),        +(str2 , 1)),
-MOVE(&("an"),        +(str2 , 2)),
-MOVE(&("example"),   +(str2 , 3)),
-MOVE(&("of"),        +(str2 , 4)),
-MOVE(&("an"),        +(str2 , 5)),
-MOVE(&("args list"), +(str2 , 6)),
+MOVE(&("hello"),+(str2 , 0)),
+MOVE(&("world"),+(str2 , 1)),
+MOVE(&("world"),+(str2 , 2)),
+MOVE(&("world"),+(str2 , 3)),
+
 
 CALL(main, (7,str2))
