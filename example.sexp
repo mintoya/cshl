@@ -10,14 +10,16 @@
 
 (INIT type (TYPE))
 
-(INIT slice (BLOCK '(type itype) type (
+(INIT slice (BLOCK '(type) type (
     (RETURN 
       (STRUCT 
         u64
-        (PTR (ARG 0))
-      )
-    )
-)))
+        (PTR (ARG 0))))
+  )))
  
-(INIT main (BLOCK '((PTR i8)) i32 (
-)))
+
+(INIT main (BLOCK 
+'((CALL slice '(CALL slice '(i8)))) i32 (
+    (RETURN 0)
+  )))
+

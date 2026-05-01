@@ -234,8 +234,21 @@ fptr coerce(
   return nullFptr;
 }
 
+fptr checkLiteral(astNode *node) {
+  assertMessage(node->op == builtin_NONE);
+  assertMessage(!(node->args));
+  var_ res = node->text;
+  assertMessage(res.len && res.ptr);
+  return res;
+}
+msList(astNode *) checkList(astNode *node) {
+  assertMessage(node->op == builtin_NONE);
+  assertMessage(!(node->text.len));
+  assertMessage(node->args);
+  return node->args;
+}
+
 symbol interpret(
-    AllocatorV allocator,
     mList(u8) stack,
     mList(usize) stack_frames,
     astNode *node,
@@ -250,8 +263,129 @@ symbol interpret(
   };
 
   switch (node->op) {
+
+      //
+      // misc
+      //
+
+    case builtin_NONE: {
+      var_ s = symbolResolve(symbols, checkLiteral(node));
+      assertMessage(
+          s,
+          "%s",
+          snprint(stdAlloc, "unknown symbol : {slice(c8)}", node->text).ptr
+      );
+      return *s;
+    } break;
+      //
+      // types
+      //
+
+      // TODO
+      // hashmap of stringified types
+    case builtin_SINT:
+    case builtin_UINT: {
+      assertMessage(node->args && msList_len(node->args) == 1);
+      fptr number = checkLiteral(node->args[0]);
+      assertMessage(fptr_is_number(number));
+      u32 bitwidth = (u32)fptr_to_number(number);
+      var_ h = (struct intHandle){
+          .bitcount = bitwidth,
+          .issigned = node->op == builtin_SINT,
+      };
+      return (symbol){
+          .type = get_itype(h),
+          .kind = SYM_OF((sym_type){})
+      };
+    } break;
+    case builtin_TYPE: {
+      static var_ typetype = ITYPE_OF((item_type_type){});
+      return (symbol){
+          .type = &typetype,
+          .kind = SYM_OF((sym_type){})
+      };
+    } break;
+    case builtin_PTR: {
+      assertMessage(node->args && msList_len(node->args) == 1);
+      AllocatorV tscope = msHmap_allocator(mList_last(symbols));
+      var_ typesym = interpret(stack, stack_frames, node->args[0], symbols);
+      assertMessage(SYM_IS(type, typesym.kind));
+      return (symbol){
+          .type = make_ptr(tscope, typesym.type),
+          .kind = SYM_OF((sym_type){})
+      };
+    } break;
+
+      //
+      // functions
+      //
+    case builtin_BLOCK: {
+      assertMessage(node->args && msList_len(node->args) == 3);
+      AllocatorV tscope = msHmap_allocator(mList_last(symbols));
+      var_ arglist_node = checkList(node->args[0]);
+      var_ rtype_node = node->args[1];
+      var_ opslist_node = checkList(node->args[2]);
+      var_ typeslist =
+          msList_init(
+              tscope,
+              item_type *,
+              msList_len(arglist_node)
+          );
+      foreach (var_ type, vla(*msList_vla(arglist_node))) {
+        var_ sym = interpret(stack, stack_frames, type, symbols);
+        assertMessage(SYM_IS(type, sym.kind));
+        var_ ttype = sym.type;
+        msList_push(
+            tscope,
+            typeslist,
+            ttype
+        );
+      }
+      {
+        var_ sym = interpret(stack, stack_frames, rtype_node, symbols);
+        assertMessage(SYM_IS(type, sym.kind));
+        var_ type = sym.type;
+        msList_push(
+            tscope,
+            typeslist,
+            type
+        );
+      }
+
+      return (symbol){
+          .kind = SYM_OF((sym_function){opslist_node}),
+          .type = make_block(tscope, typeslist),
+      };
+    } break;
+      //
+      // creations
+      //
+
+    case builtin_INIT: {
+      assertMessage(node->args && msList_len(node->args) == 2);
+
+      var_ name = checkLiteral(node->args[0]);
+      var_ item = node->args[1];
+
+      msHmap_set(
+          mList_last(symbols),
+          name,
+          interpret(stack, stack_frames, item, symbols)
+      );
+      return *msHmap_get(mList_last(symbols), name);
+    } break;
+      //
     default:
-      assertMessage(false, "%s", snprint(stdAlloc, "unimplemented op : {builtin_OP}", node->op).ptr);
+      assertMessage(
+          false,
+          "%s",
+          snprint(
+              stdAlloc,
+              "unimplemented op : {builtin_OP} , text : \"{slice(c8)}\"",
+              node->op, node->text
+          )
+              .ptr
+      );
       break;
   }
 }
@@ -278,14 +412,15 @@ fptr read_stdin(AllocatorV allocator) {
 }
 int main(void) {
 
-  AllocatorV astArena = arena_new_ext(stdAlloc, 512);
-  defer { arena_cleanup(astArena); };
-
   var_ stin = read_stdin(stdAlloc);
   defer { slice_free(stdAlloc, stin); };
+
+  AllocatorV astArena = arena_new_ext(stdAlloc, 1024);
+  defer { arena_cleanup(astArena); };
+
   var_ list = sexp_parse_file(astArena, stin);
 
-  iType_alllocator = arena_new_ext(stdAlloc, 512);
+  iType_alllocator = arena_new_ext(stdAlloc, 1024);
   defer { arena_cleanup(iType_alllocator); };
 
   println("{msList : astNode : numbers}", list);
@@ -294,21 +429,22 @@ int main(void) {
   var_ stack = mList_init(stdAlloc, u8);
   defer { mList_deInit(stack); };
 
-  AllocatorV symArena = arena_new_ext(stdAlloc, 512);
+  AllocatorV symArena = arena_new_ext(stdAlloc, 1024);
   defer { arena_cleanup(symArena); };
 
   var_ stack_frames = mList_init(symArena, usize);
   var_ symbols = mList_init(symArena, msHmap(symbol));
   mList_push(symbols, (msHmap_init(symArena, symbol)));
 
-  // foreach (var_ node, vla(*msList_vla(list)))
-  //   interpret(
-  //       stdAlloc,
-  //       stack,
-  //       stack_frames,
-  //       node,
-  //       symbols
-  //   );
+  foreach (var_ node, vla(*msList_vla(list)))
+    interpret(
+        stack,
+        stack_frames,
+        node,
+        symbols
+    );
+
+  println("arena capacity : {}", arena_totalMem(symArena));
   println("stack capacity : {}", mList_cap(stack));
 }
 #include "wheels/wheels.h"

@@ -136,18 +136,18 @@ tu_def(
     (sym_none /*    */, struct {}),
     (sym_type /*    */, struct {}),
     (sym_value /*  */, usize),
-    (sym_function /**/, astNode *),
+    (sym_function /**/, msList(astNode *)),
     (sym_extern /*  */, item_type_block *),
 );
 
-  #define SYM_OF(item)                                                                                               \
-    _Generic(                                                                                                        \
-        (REF(typeof(item), item)),                                                                                   \
-        sym_none * /*    */: (symKind)tu_of(sym_none, /*    */ (*(sym_none *)/*    */ REF(typeof(item), item))),     \
-        sym_type * /*    */: (symKind)tu_of(sym_type, /*    */ (*(sym_type *)/*    */ REF(typeof(item), item))),     \
-        sym_value * /*  */: (symKind)tu_of(sym_rvalue, /*  */ (*(sym_rvalue *)/*  */ REF(typeof(item), item)))       \
-            sym_function * /**/: (symKind)tu_of(sym_function, /**/ (*(sym_function *)/**/ REF(typeof(item), item))), \
-        sym_extern * /*  */: (symKind)tu_of(sym_extern, /*  */ (*(sym_extern *)/*  */ REF(typeof(item), item))),     \
+  #define SYM_OF(item)                                                                                            \
+    _Generic(                                                                                                     \
+        (REF(typeof(item), item)),                                                                                \
+        sym_none * /*    */: (symKind)tu_of(sym_none, /*    */ (*(sym_none *)/*    */ REF(typeof(item), item))),  \
+        sym_type * /*    */: (symKind)tu_of(sym_type, /*    */ (*(sym_type *)/*    */ REF(typeof(item), item))),  \
+        sym_value * /*   */: (symKind)tu_of(sym_value, /*    */ (*(sym_value *)/*   */ REF(typeof(item), item))), \
+        sym_function * /**/: (symKind)tu_of(sym_function, /**/ (*(sym_function *)/**/ REF(typeof(item), item))),  \
+        sym_extern * /*  */: (symKind)tu_of(sym_extern, /*  */ (*(sym_extern *)/*  */ REF(typeof(item), item)))   \
     )
   #define SYM_IS(type, s) tu_is(sym_##type, s)
 
