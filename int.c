@@ -5,9 +5,8 @@
 #include "wheels/tagged_unions.h"
 #include <assert.h>
 #include <stdbool.h>
-#include <string.h>
 
-#include "ast.c"
+#include "sexp_parser.c"
 #include "typ.c"
 #include "wheels/tu_macros.h"
 
@@ -21,7 +20,7 @@ item_type *item_type_allocate_from(AllocatorV allocator, item_type i) {
 }
 struct intHandle {
   bool issigned;
-  usize bitcount;
+  u32 bitcount;
 };
 AllocatorV iType_alllocator = NULL;
 item_type *get_itype(struct intHandle h) {
@@ -32,7 +31,7 @@ item_type *get_itype(struct intHandle h) {
     // set up signed and unsigned
     // 8, 16, 32, 64
     usize widths[] = {8, 16, 32, 64};
-    foreach (usize j, vla(widths))
+    foreach (u32 j, vla(widths))
       mHmap_set(
           imap,
           ((typeof(h)){
@@ -57,11 +56,11 @@ item_type *get_itype(struct intHandle h) {
             h.issigned
                 ? ITYPE_OF(((item_type_sint){
                       .bitwidth = h.bitcount,
-                      .alignment = lineup(h.bitcount, 8) / 8,
+                      .alignment = (u32)lineup(h.bitcount, 8) / 8,
                   }))
                 : ITYPE_OF(((item_type_uint){
                       .bitwidth = h.bitcount,
-                      .alignment = lineup(h.bitcount, 8) / 8,
+                      .alignment = (u32)lineup(h.bitcount, 8) / 8,
                   }))
         )
     );
@@ -142,7 +141,7 @@ symbol *symbolResolve(mList(msHmap(symbol)) symstack, fptr sym) {
   return NULL;
 }
 
-sym_rvalue coerce(
+fptr coerce(
     AllocatorV allocator,
     mList(u8) stack,
     symbol sym,
@@ -151,13 +150,9 @@ sym_rvalue coerce(
   var_ srct = sym.type[0];
   var_ dstt = to[0];
   u8 *src_ptr = 0;
-
   tu_match(
-      sym.kind, case (sym_lvalue, val, {
+      sym.kind, case (sym_value, val, {
         src_ptr = (u8 *)mList_arr(stack) + val;
-      }),
-      case (sym_rvalue, val, {
-        src_ptr = val.ptr;
       }),
       case (sym_type, _, {
         src_ptr = (u8 *)sym.type;
@@ -189,7 +184,7 @@ sym_rvalue coerce(
               for (usize i = 0; i < cp; i++)
                 dp[i] = src_ptr[i];
 
-              return (sym_rvalue){ds, dp};
+              return (fptr){ds, dp};
             }),
             case (item_type_sint, src_sint, {
               u8 *dp = slice_alloc(allocator, u8, ds).ptr;
@@ -200,7 +195,7 @@ sym_rvalue coerce(
               for (usize i = 0; i < cp; i++)
                 dp[i] = src_ptr[i];
 
-              return (sym_rvalue){ds, dp};
+              return (fptr){ds, dp};
             }),
             default(return nullFptr;)
         );
@@ -217,7 +212,7 @@ sym_rvalue coerce(
               for (usize i = 0; i < cp; i++)
                 dp[i] = src_ptr[i];
 
-              return (sym_rvalue){ds, dp};
+              return (fptr){ds, dp};
             }),
             case (item_type_sint, src_sint, {
               u8 *dp = slice_alloc(allocator, u8, ds).ptr;
@@ -228,7 +223,7 @@ sym_rvalue coerce(
                 dp[i] = (i < ss) ? src_ptr[i] : sign;
               }
 
-              return (sym_rvalue){ds, dp};
+              return (fptr){ds, dp};
             }),
             default(return nullFptr;)
         );
@@ -256,7 +251,7 @@ symbol interpret(
 
   switch (node->op) {
     default:
-      assertMessage(false, "%s", snprint(stdAlloc, "{builtin_OP}", node->op).ptr);
+      assertMessage(false, "%s", snprint(stdAlloc, "unimplemented op : {builtin_OP}", node->op).ptr);
       break;
   }
 }
@@ -288,18 +283,13 @@ int main(void) {
 
   var_ stin = read_stdin(stdAlloc);
   defer { slice_free(stdAlloc, stin); };
-  var_ list = astNode_process_file(astArena, stin);
+  var_ list = sexp_parse_file(astArena, stin);
 
   iType_alllocator = arena_new_ext(stdAlloc, 512);
   defer { arena_cleanup(iType_alllocator); };
 
-  //   c8 lit[] =
-  //       {
-  // #embed "int.txt"
-  //       };
-  //   var_ list = astNode_process_file(stdAlloc, fp(lit));
-  // println("{msList : astNode}", list);
-  // println("{msList : astNode : numbers}", list);
+  println("{msList : astNode : numbers}", list);
+  println("{msList : astNode}", list);
 
   var_ stack = mList_init(stdAlloc, u8);
   defer { mList_deInit(stack); };
@@ -311,14 +301,14 @@ int main(void) {
   var_ symbols = mList_init(symArena, msHmap(symbol));
   mList_push(symbols, (msHmap_init(symArena, symbol)));
 
-  foreach (var_ node, vla(*msList_vla(list)))
-    interpret(
-        stdAlloc,
-        stack,
-        stack_frames,
-        node,
-        symbols
-    );
+  // foreach (var_ node, vla(*msList_vla(list)))
+  //   interpret(
+  //       stdAlloc,
+  //       stack,
+  //       stack_frames,
+  //       node,
+  //       symbols
+  //   );
   println("stack capacity : {}", mList_cap(stack));
 }
 #include "wheels/wheels.h"

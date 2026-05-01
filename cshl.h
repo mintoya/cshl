@@ -1,7 +1,8 @@
 #if !defined(CSHL_H)
   #define CSHL_H (1)
   #include "wheels/fptr.h"
-  #include "wheels/mylist.h"
+  #include "wheels/macros.h"
+  #include "wheels/mytypes.h"
   #include "wheels/print.h"
   #include "wheels/sList.h"
   #include "wheels/tu_macros.h"
@@ -10,58 +11,77 @@
 // 'ast'
 //
 
-  #define OPERATIONS_X                                        \
-    X(NONE),                                                  \
-        X(SINT),    /*signed integer (bits)*/                 \
-        X(UINT),    /*unsigned integer(bits)*/                \
-        X(STRUCT),  /*struct(types)*/                         \
-        X(PSTRUCT), /*packed struct(types)*/                  \
-        X(UNION),   /*union(types)*/                          \
-        X(PTR),     /*pointer to (type)*/                     \
-        X(BLOCK),   /*(inputs,output,instructions)*/          \
-        X(RETURN),  /*return (value)*/                        \
-        X(LABEL),   /*create(label)*/                         \
-        X(JMP),     /*jump to (label)*/                       \
-        X(JMP_IF),  /*if a is true JMP (a,label)*/            \
-        X(CALL),    /*call (functionid,(argslist...))*/       \
-        X(INIT),    /*declare (sym,type?,value)*/             \
-        X(ASSIGN),  /*assign b to a(a,b)*/                    \
-        X(MOVE),    /*copy(fromptr,toptr)*/                   \
-        X(ARG),     /*get nth arg (n)*/                       \
-        X(WHERE),   /*pointer-to(sym)*/                       \
-        X(NOT),     /*  !(a)*/                                \
-        X(OR),      /*a | b  (a,b)*/                          \
-        X(AND),     /*a && b (a,b)*/                          \
-        X(XOR),     /*a ^ b  (a,b)*/                          \
-        X(BNOT),    /*  ~(a)*/                                \
-        X(BOR),     /*a | b  (a,b)*/                          \
-        X(BAND),    /*a & b (a,b)*/                           \
-        X(BXOR),    /*a ^ b  (a,b)*/                          \
-        X(EQUAL),   /* a == b (a,b)*/                         \
-        X(MORE),    /* a > b (a,b)*/                          \
-        X(LESS),    /* a < b (a,b)*/                          \
-        X(ADD),     /*add b to sym(b,sym)*/                   \
-        X(SUB),     /*subtract b from sym(sym,b)*/            \
-        X(MUL),     /*multiply a by b,then set a (a,b)*/      \
-        X(DIV),     /*divide a by b , then set a (a,b)*/      \
-        X(SHR),     /*shift a by b (a , b)*/                  \
-        X(SHL),     /*shift a by b (a , b)*/                  \
-        X(MOD),     /*mod a by b , then set a (a,b)*/         \
-        X(TYPE),    /*type*/                                  \
-        X(SIZEOF),  /*size of t (t)*/                         \
-        X(ALIGNOF), /*align of t (t)*/                        \
-        X(OFSOF),   /*offset fo n'th st item (st,n)*/         \
-        X(ALLOCA),  /*push n of type onto the stack(type,n)*/ \
-        X(ELEMPTR), /**/
+// clang-format off
 
-  #define OP_NAME(n) #n
-  #define OP_ENUM(n) builtin_##n
+  #define TYPE_OPERATIONS\
+    SINT,/* _BitInt(n)               (n)      */\
+    UINT,/* unsigned _Bitint(n)      (n)      */\
+    FLOAT,/* double enum             (n)      */\
+    STRUCT,/*struct of ... types     (type...)*/\
+    PSTRUCT,/*packed version                  */\
+    UNION,/*union of ... types       (type...)*/\
+    PTR,/*pointer to type            (type)   */\
+    TYPE,/*type of type              ()       */\
+    TYPEOF,/*type of type                     */
 
-  #define X(n) OP_ENUM(n)
+  #define STRUCT_OPERATIONS\
+    ELEMPTR,
+
+  #define PTR_OPERATIONS\
+    REF,/* a = &b   (a,b)*/\
+    CP, /* *a = *b  (a,b)*/
+
+  #define MATH_OPERATIONS  /*all syms*/\
+    NOT,  /*a = !(b)          (a,b)  */\
+    BNOT, /*a = ~(b)          (a,b)  */\
+    OR,   /*a = (b||c)        (a,b,c)*/\
+    BOR,  /*a = (b|c)         (a,b,c)*/\
+    AND,  /*a = (b&&c)        (a,b,c)*/\
+    BAND, /*a = (b&c)         (a,b,c)*/\
+    XOR,  /*a = ((!!b)^(!!c)) (a,b,c)*/\
+    BXOR, /*a = (b^c)         (a,b,c)*/\
+    EQUAL,/*a = (b==c)        (a,b,c)*/\
+    MORE, /*a = (b>c)         (a,b,c)*/\
+    LESS, /*a = (b<c)         (a,b,c)*/\
+    ADD,  /*a = (b+c)         (a,b,c)*/\
+    SUB,  /*a = (b-c)         (a,b,c)*/\
+    MUL,  /*a = (b*c)         (a,b,c)*/\
+    DIV,  /*a = (b/c)         (a,b,c)*/\
+    SHR,  /*a = (b>>c)        (a,b,c)*/\
+    SHL,  /*a = (b<<c)        (a,b,c)*/\
+    MOD,  /*a = (b%c)         (a,b,c)*/\
+
+  #define FUNCTION_OPERATIONS\
+    ARG,/*nth arg of current fn (n)*/\
+    BLOCK, /*       ((...),t,(...))*/\
+    EXTERN,/*       ((...),t,(...))*/\
+    CALL,  /*  a = b(c) CALL(a,b,c)*/\
+
+  #define MISC_OPERATIONS\
+    NONE,  /*symbol is none , none with args is list*/\
+    DECL,  /* t s             (s,t)*/\
+    SET,   /* s = v           (s,v)*/\
+    INIT,  /* typeof(v) s = v (s,v)*/\
+    JMP,   /* goto(a)         (a)  */\
+    JMP_IF,/* if(a) goto(b)   (a,b)*/\
+    LABEL, /* create label    (b)  */
+
+// clang-format on
+
+  #define OPERATIONS  \
+    MISC_OPERATIONS   \
+    MATH_OPERATIONS   \
+    PTR_OPERATIONS    \
+    STRUCT_OPERATIONS \
+    TYPE_OPERATIONS   \
+    FUNCTION_OPERATIONS
+
+  #define OP_NAME(n) #n,
+  #define OP_ENUM(n) builtin_##n,
+
 typedef enum builtin_OP {
-  OPERATIONS_X
+  APPLY_N(OP_ENUM, OPERATIONS)
 } builtin_OP;
-  #undef X
 
 /**
  * text : the text that represents this ast node
@@ -83,13 +103,13 @@ typedef struct item_type item_type;
 
 tu_def(
     (item_type, u8),
-    (item_type_type, struct {}),
-    (item_type_ptr, struct { usize alignment ; item_type* type ; }),
-    (item_type_sint, struct { usize alignment; usize bitwidth; }),
-    (item_type_uint, struct { usize alignment; usize bitwidth; }),
-    (item_type_struct, struct { usize alignment; struct { item_type *type; usize offset; } *types; }),
-    (item_type_union, struct { usize alignment; item_type **types; }),
-    (item_type_block, struct { item_type **types; }),
+    (item_type_type /*  */, struct {}),
+    (item_type_ptr /*   */, struct { u32 alignment; item_type* type ; }),
+    (item_type_sint /*  */, struct { u32 alignment; u32 bitwidth; }),
+    (item_type_uint /*  */, struct { u32 alignment; u32 bitwidth; }),
+    (item_type_struct /**/, struct { u32 alignment; struct { item_type *type; usize offset; } *types; }),
+    (item_type_union /* */, struct { u32 alignment; item_type **types; }),
+    (item_type_block /* */, struct { item_type **types; }),
 );
   #define ITYPE_OF(item)                                                                                                         \
     _Generic(                                                                                                                    \
@@ -110,26 +130,24 @@ tu_def(
 //
 
 typedef struct symbol symbol;
-typedef symbol (*sym_extern)(usize return_addr, mList(u8) stack, mList(usize) stack_frame);
+// typedef symbol (*sym_extern)(usize return_addr, mList(u8) stack, mList(usize) stack_frame);
 tu_def(
     (symKind, u8),
-    (sym_none, struct {}),
-    (sym_type, struct {}),
-    (sym_lvalue, usize),
-    (sym_rvalue, fptr),
-    (sym_function, astNode *),
-    (sym_extern, sym_extern),
+    (sym_none /*    */, struct {}),
+    (sym_type /*    */, struct {}),
+    (sym_value /*  */, usize),
+    (sym_function /**/, astNode *),
+    (sym_extern /*  */, item_type_block *),
 );
 
-  #define SYM_OF(item)                                                                                           \
-    _Generic(                                                                                                    \
-        (REF(typeof(item), item)),                                                                               \
-        sym_none * /*    */: (symKind)tu_of(sym_none, /*    */ (*(sym_none *)/*    */ REF(typeof(item), item))), \
-        sym_function * /**/: (symKind)tu_of(sym_function, /**/ (*(sym_function *)/**/ REF(typeof(item), item))), \
-        sym_extern * /*  */: (symKind)tu_of(sym_extern, /*  */ (*(sym_extern *)/*  */ REF(typeof(item), item))), \
-        sym_type * /*    */: (symKind)tu_of(sym_type, /*    */ (*(sym_type *)/*    */ REF(typeof(item), item))), \
-        sym_lvalue * /*  */: (symKind)tu_of(sym_lvalue, /*  */ (*(sym_lvalue *)/*  */ REF(typeof(item), item))), \
-        sym_rvalue * /*  */: (symKind)tu_of(sym_rvalue, /*  */ (*(sym_rvalue *)/*  */ REF(typeof(item), item)))  \
+  #define SYM_OF(item)                                                                                               \
+    _Generic(                                                                                                        \
+        (REF(typeof(item), item)),                                                                                   \
+        sym_none * /*    */: (symKind)tu_of(sym_none, /*    */ (*(sym_none *)/*    */ REF(typeof(item), item))),     \
+        sym_type * /*    */: (symKind)tu_of(sym_type, /*    */ (*(sym_type *)/*    */ REF(typeof(item), item))),     \
+        sym_value * /*  */: (symKind)tu_of(sym_rvalue, /*  */ (*(sym_rvalue *)/*  */ REF(typeof(item), item)))       \
+            sym_function * /**/: (symKind)tu_of(sym_function, /**/ (*(sym_function *)/**/ REF(typeof(item), item))), \
+        sym_extern * /*  */: (symKind)tu_of(sym_extern, /*  */ (*(sym_extern *)/*  */ REF(typeof(item), item))),     \
     )
   #define SYM_IS(type, s) tu_is(sym_##type, s)
 
@@ -140,14 +158,11 @@ typedef struct symbol {
   symKind kind;
 } symbol;
 
-  #define X(...) #__VA_ARGS__
-
 REGISTER_PRINTER(symbol, {
   PUTS("{");
   tu_match(
       in.kind,
-      case (sym_lvalue, x, /*  */ { PUTS("lvalue"); }),
-      case (sym_rvalue, x, /*  */ { PUTS("rvalue"); }),
+      case (sym_value, x, /*  */ { PUTS("value"); }),
       case (sym_function, x, /**/ { PUTS("function"); }),
       case (sym_extern, x, /*  */ { PUTS("extern"); }),
       case (sym_type, x, /*    */ { PUTS("type"); }),
@@ -162,8 +177,8 @@ REGISTER_PRINTER(symbol, {
   PUTS("}");
 });
 REGISTER_PRINTER(builtin_OP, {
-  char builtins[][8] = {
-      OPERATIONS_X
+  char *builtins[] = {
+      APPLY_N(OP_NAME, OPERATIONS)
   };
   var_ v = builtins[in];
   USENAMEDPRINTER("cstr", v);
@@ -172,8 +187,8 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
   args = printer_arg_trim(args);
   bool usenumbers = false;
 
-  char builtins[][8] = {
-      OPERATIONS_X
+  char *builtins[] = {
+      APPLY_N(OP_NAME, OPERATIONS)
   };
   if (fptr_eq(args, fp("numbers")))
     usenumbers = true;
