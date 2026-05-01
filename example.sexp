@@ -18,8 +18,8 @@
   )))
  
 
-(INIT main (BLOCK 
-'((CALL slice '(CALL slice '(i8)))) i32 (
+(INIT main 
+  (BLOCK '((CALL slice '(CALL slice '(i8)))) i32 (
     (RETURN 0)
   )))
 

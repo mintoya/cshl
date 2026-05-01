@@ -12,78 +12,19 @@
 
 static_assert(!(sizeof(symbol) % sizeof(usize)));
 
-item_type *item_type_newStub(AllocatorV typesArena) { return aCreate(typesArena, item_type); }
-item_type *item_type_allocate_from(AllocatorV allocator, item_type i) {
-  var_ res = item_type_newStub(allocator);
-  *res = i;
-  return res;
-}
-struct intHandle {
-  bool issigned;
-  u32 bitcount;
-};
-AllocatorV iType_alllocator = NULL;
-item_type *get_itype(struct intHandle h) {
-  assertMessage(iType_alllocator);
-  static mHmap(typeof(h), item_type *) imap = NULL;
-  if (!imap) {
-    imap = mHmap_init(iType_alllocator, typeof(h), item_type *);
-    // set up signed and unsigned
-    // 8, 16, 32, 64
-    usize widths[] = {8, 16, 32, 64};
-    foreach (u32 j, vla(widths))
-      mHmap_set(
-          imap,
-          ((typeof(h)){
-              .issigned = false,
-              .bitcount = j,
-          }),
-          item_type_allocate_from(
-              iType_alllocator,
-              ITYPE_OF(((item_type_uint){j, j}))
-          )
-      );
-  }
-  item_type **res = mHmap_get(imap, h);
-  if (res)
-    return *res;
-  else {
-    mHmap_set(
-        imap,
-        h,
-        item_type_allocate_from(
-            iType_alllocator,
-            h.issigned
-                ? ITYPE_OF(((item_type_sint){
-                      .bitwidth = h.bitcount,
-                      .alignment = (u32)lineup(h.bitcount, 8) / 8,
-                  }))
-                : ITYPE_OF(((item_type_uint){
-                      .bitwidth = h.bitcount,
-                      .alignment = (u32)lineup(h.bitcount, 8) / 8,
-                  }))
-        )
-    );
-    res = mHmap_get(imap, h);
-    assertMessage(res);
-    return *res;
-  }
-}
-item_type *make_ptr(AllocatorV allocator, item_type *type) {
-  var_ res = item_type_newStub(allocator);
-  *res = ITYPE_OF(((item_type_ptr){.type = type}));
-  return res;
-}
-item_type *make_block(AllocatorV allocator, msList(item_type *) typething) {
-  var_ res = item_type_newStub(allocator);
-  *res = ITYPE_OF((item_type_block){.types = typething});
-  return res;
-}
-typedef typeof(*((item_type_struct *)NULL)->types) struct_inner;
-item_type *make_struct(AllocatorV allocator, msList(struct_inner) typething) {
-  var_ res = item_type_newStub(allocator);
-  *res = ITYPE_OF((item_type_struct){.types = typething});
-  return res;
+AllocatorV type_allocator = NULL;
+
+item_type *make_type(item_type t) {
+  mHmap(item_type, item_type *) tmap = NULL;
+  tmap = tmap ?: mHmap_init(type_allocator, item_type, item_type *);
+
+  return *mHmapGetOrSet(
+      tmap, t, ({
+        var_ rp = aCreate(type_allocator, item_type);
+        *rp = t;
+        rp;
+      })
+  );
 }
 
 item_type *get_ptr_iType(item_type *t) {
@@ -96,7 +37,7 @@ item_type *get_ptr_iType(item_type *t) {
         assertMessage(
             false,
             "tried to get inner pointer to %s",
-            snprint(stdAlloc, "{item_type}", &t).ptr
+            snprint(stdAlloc, "{item_type}", t[0]).ptr
         );
       })
   );
@@ -110,7 +51,7 @@ usize get_int_bitwidth(item_type *t) {
         assertMessage(
             false,
             "tried to bitwidth to %s",
-            snprint(stdAlloc, "{item_type}", &t).ptr
+            snprint(stdAlloc, "{item_type}", t[0]).ptr
         );
       })
   );
@@ -234,11 +175,12 @@ fptr coerce(
   return nullFptr;
 }
 
-fptr checkLiteral(astNode *node) {
-  assertMessage(node->op == builtin_NONE);
-  assertMessage(!(node->args));
+#define assertprint(bool, fmt, ...) assertMessage(bool, "%s", snprint(stdAlloc, fmt, __VA_ARGS__).ptr)
+fptr checkLiteral(astNode *node, char *message) {
+  assertprint(node->op == builtin_NONE, "not a literal : {slice(c8)} : {cstr}", node->text, message);
+  assertprint(!(node->args), "litral has args: {astNode} : {cstr}", node, message);
   var_ res = node->text;
-  assertMessage(res.len && res.ptr);
+  assertprint(res.len && res.ptr, "not a literal : {slice(c8)} : {cstr}", node->text, message);
   return res;
 }
 msList(astNode *) checkList(astNode *node) {
@@ -252,14 +194,18 @@ symbol interpret(
     mList(u8) stack,
     mList(usize) stack_frames,
     astNode *node,
-    mList(msHmap(symbol)) symbols
+    mList(msHmap(symbol)) symbols,
+    mList(msList(u8)) call_stack // -_- // packed item_type and their types // usize first
 ) {
   defer {
-    assertMessage(
-        !(mList_len(stack) % 8),
-        "last instruction misaligned stack : %s",
-        snprint(stdAlloc, "{astNode} , {slice(c8)}", node, node->text).ptr
-    );
+    // assertMessage(
+    //     !(mList_len(stack) % 8),
+    //     "last instruction misaligned stack : %s",
+    //     snprint(stdAlloc, "{astNode} , {slice(c8)}", node, node->text).ptr
+    // );
+
+    while (mList_len(stack) % 8)
+      mList_push(stack, 0);
   };
 
   switch (node->op) {
@@ -269,7 +215,7 @@ symbol interpret(
       //
 
     case builtin_NONE: {
-      var_ s = symbolResolve(symbols, checkLiteral(node));
+      var_ s = symbolResolve(symbols, checkLiteral(node, "resolving symbol"));
       assertMessage(
           s,
           "%s",
@@ -286,15 +232,15 @@ symbol interpret(
     case builtin_SINT:
     case builtin_UINT: {
       assertMessage(node->args && msList_len(node->args) == 1);
-      fptr number = checkLiteral(node->args[0]);
+      fptr number = checkLiteral(node->args[0], "integer bitcount");
       assertMessage(fptr_is_number(number));
       u32 bitwidth = (u32)fptr_to_number(number);
-      var_ h = (struct intHandle){
-          .bitcount = bitwidth,
-          .issigned = node->op == builtin_SINT,
-      };
+      item_type t =
+          node->op == builtin_SINT
+              ? ITYPE_OF(((item_type_sint){0, bitwidth}))
+              : ITYPE_OF(((item_type_uint){0, bitwidth}));
       return (symbol){
-          .type = get_itype(h),
+          .type = make_type(t),
           .kind = SYM_OF((sym_type){})
       };
     } break;
@@ -308,10 +254,10 @@ symbol interpret(
     case builtin_PTR: {
       assertMessage(node->args && msList_len(node->args) == 1);
       AllocatorV tscope = msHmap_allocator(mList_last(symbols));
-      var_ typesym = interpret(stack, stack_frames, node->args[0], symbols);
+      var_ typesym = interpret(stack, stack_frames, node->args[0], symbols, call_stack);
       assertMessage(SYM_IS(type, typesym.kind));
       return (symbol){
-          .type = make_ptr(tscope, typesym.type),
+          .type = make_type(ITYPE_OF(((item_type_ptr){0, typesym.type}))),
           .kind = SYM_OF((sym_type){})
       };
     } break;
@@ -321,42 +267,73 @@ symbol interpret(
       //
     case builtin_BLOCK: {
       assertMessage(node->args && msList_len(node->args) == 3);
-      AllocatorV tscope = msHmap_allocator(mList_last(symbols));
       var_ arglist_node = checkList(node->args[0]);
       var_ rtype_node = node->args[1];
       var_ opslist_node = checkList(node->args[2]);
       var_ typeslist =
           msList_init(
-              tscope,
+              type_allocator,
               item_type *,
               msList_len(arglist_node)
           );
       foreach (var_ type, vla(*msList_vla(arglist_node))) {
-        var_ sym = interpret(stack, stack_frames, type, symbols);
+        var_ sym = interpret(stack, stack_frames, type, symbols, call_stack);
         assertMessage(SYM_IS(type, sym.kind));
         var_ ttype = sym.type;
-        msList_push(
-            tscope,
-            typeslist,
-            ttype
-        );
+        msList_push(type_allocator, typeslist, ttype);
       }
       {
-        var_ sym = interpret(stack, stack_frames, rtype_node, symbols);
+        var_ sym = interpret(stack, stack_frames, rtype_node, symbols, call_stack);
         assertMessage(SYM_IS(type, sym.kind));
         var_ type = sym.type;
-        msList_push(
-            tscope,
-            typeslist,
-            type
-        );
+        msList_push(type_allocator, typeslist, type);
       }
 
       return (symbol){
           .kind = SYM_OF((sym_function){opslist_node}),
-          .type = make_block(tscope, typeslist),
+          .type = make_type(ITYPE_OF(((item_type_block){typeslist}))),
       };
     } break;
+    case builtin_CALL: {
+      assertMessage(node->args && msList_len(node->args) == 2);
+      var_ function = interpret(stack, stack_frames, node->args[0], symbols, call_stack);
+      var_ argslist = checkList(node->args[1]);
+
+      var_ function_ops = tu_assert(sym_function, function.kind);
+      var_ function_typ = tu_assert(item_type_block, function.type[0]);
+
+      /*
+       * returned item
+       * -- new stack frame --
+       */
+      var_ return_type = msList_last(function_typ.types);
+      usize return_type_size;
+
+      tu_match(
+          return_type[0],
+          case (item_type_block, _, return_type_size = 0;),
+          case (item_type_type, _, return_type_size = 0;),
+          default(return_type_size = type_size(return_type);)
+      );
+      mList_pushArr(stack, *VLAP((u8 *)NULL, return_type_size));
+      while (mList_len(stack) % 8)
+        mList_push(stack, 0);
+
+      mList_push(stack_frames, mList_len(stack));
+      defer { mList_len(stack) = mList_pop(stack_frames); };
+
+      var_ listAllocator = ((List *)call_stack)->allocator;
+      mList_push(call_stack, msList_init(listAllocator, u8));
+      defer {
+        msList_deInit(listAllocator, mList_last(call_stack));
+        mList_pop(call_stack);
+      };
+
+    } break;
+    case builtin_ARG: {
+
+    } break;
+
       //
       // creations
       //
@@ -364,13 +341,13 @@ symbol interpret(
     case builtin_INIT: {
       assertMessage(node->args && msList_len(node->args) == 2);
 
-      var_ name = checkLiteral(node->args[0]);
+      var_ name = checkLiteral(node->args[0], "creating variable");
       var_ item = node->args[1];
 
       msHmap_set(
           mList_last(symbols),
           name,
-          interpret(stack, stack_frames, item, symbols)
+          interpret(stack, stack_frames, item, symbols, call_stack)
       );
       return *msHmap_get(mList_last(symbols), name);
     } break;
@@ -386,6 +363,7 @@ symbol interpret(
           )
               .ptr
       );
+      return (symbol){};
       break;
   }
 }
@@ -420,8 +398,8 @@ int main(void) {
 
   var_ list = sexp_parse_file(astArena, stin);
 
-  iType_alllocator = arena_new_ext(stdAlloc, 1024);
-  defer { arena_cleanup(iType_alllocator); };
+  type_allocator = arena_new_ext(stdAlloc, 1024);
+  defer { arena_cleanup(type_allocator); };
 
   println("{msList : astNode : numbers}", list);
   println("{msList : astNode}", list);

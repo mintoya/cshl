@@ -111,6 +111,15 @@ tu_def(
     (item_type_union /* */, struct { u32 alignment; item_type **types; }),
     (item_type_block /* */, struct { item_type **types; }),
 );
+typedef struct symbol symbol;
+tu_def(
+    (symKind, u8),
+    (sym_none /*    */, struct {}),
+    (sym_type /*    */, struct {}),
+    (sym_value /*  */, usize),
+    (sym_function /**/, msList(astNode *)),
+    (sym_extern /*  */, item_type_block *),
+);
   #define ITYPE_OF(item)                                                                                                         \
     _Generic(                                                                                                                    \
         (REF(typeof(item), item)),                                                                                               \
@@ -124,21 +133,6 @@ tu_def(
     )
 
   #define ITYPE_IS(type, s) tu_is(item_type_##type, s)
-
-//
-// interpreter
-//
-
-typedef struct symbol symbol;
-// typedef symbol (*sym_extern)(usize return_addr, mList(u8) stack, mList(usize) stack_frame);
-tu_def(
-    (symKind, u8),
-    (sym_none /*    */, struct {}),
-    (sym_type /*    */, struct {}),
-    (sym_value /*  */, usize),
-    (sym_function /**/, msList(astNode *)),
-    (sym_extern /*  */, item_type_block *),
-);
 
   #define SYM_OF(item)                                                                                            \
     _Generic(                                                                                                     \

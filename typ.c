@@ -163,13 +163,8 @@ bool item_type_equal(item_type *a, item_type *b) {
 }
 #pragma pop_macro("max")
 #pragma pop_macro("min")
-REGISTER_SPECIAL_PRINTER("item_type", item_type *, {
-  if (!in) {
-    PUTS("NULL");
-    return;
-  }
-
-  item_type ts = *in;
+REGISTER_SPECIAL_PRINTER("item_type", item_type, {
+  item_type ts = in;
   tu_match(
       ts,
       case (item_type_type, $in, {

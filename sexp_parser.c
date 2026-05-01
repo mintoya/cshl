@@ -1,5 +1,4 @@
 #include "cshl.h"
-#include "wheels/macros.h"
 
 static const char *sexp_op_names[] = {APPLY_N(OP_NAME, OPERATIONS)};
 static const usize sexp_op_count = countof(sexp_op_names);
@@ -70,7 +69,7 @@ static astNode *sexp_parse_list(AllocatorV allocator, msHmap(builtin_OP) ops, fp
 
   astNode *node = aCreate(allocator, astNode, 1);
   node->op = builtin_NONE;
-  node->text = (fptr){0};
+  node->text = (fptr){0, src.ptr};
   node->args = msList_init(allocator, astNode *);
 
   bool first = true;
@@ -139,7 +138,7 @@ msList(astNode *) sexp_parse_file(AllocatorV allocator, fptr src) {
     if (src.ptr[i] == '\'') {
       astNode *quote_list = aCreate(allocator, astNode, 1);
       quote_list->op = builtin_NONE;
-      quote_list->text = (fptr){0};
+      quote_list->text = (fptr){0, src.ptr + i};
       quote_list->args = msList_init(allocator, astNode *);
 
       astNode *quote_atom = aCreate(allocator, astNode, 1);
