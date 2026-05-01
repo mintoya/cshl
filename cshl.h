@@ -1,3 +1,4 @@
+#include <stdcountof.h>
 #if !defined(CSHL_H)
   #define CSHL_H (1)
   #include "wheels/fptr.h"
@@ -52,6 +53,7 @@
     MOD,  /*a = (b%c)         (a,b,c)*/\
 
   #define FUNCTION_OPERATIONS\
+    RETURN,\
     ARG,/*nth arg of current fn (n)*/\
     BLOCK, /*       ((...),t,(...))*/\
     EXTERN,/*       ((...),t,(...))*/\
@@ -171,10 +173,8 @@ REGISTER_PRINTER(symbol, {
   PUTS("}");
 });
 REGISTER_PRINTER(builtin_OP, {
-  char *builtins[] = {
-      APPLY_N(OP_NAME, OPERATIONS)
-  };
-  var_ v = builtins[in];
+  char *builtins[] = {APPLY_N(OP_NAME, OPERATIONS)};
+  var_ v = in < countof(builtins) ? builtins[in] : "unknown";
   USENAMEDPRINTER("cstr", v);
 })
 REGISTER_SPECIAL_PRINTER("astNode", astNode *, {

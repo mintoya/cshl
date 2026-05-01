@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
             "-g",
             "-w",
             "-fno-sanitize=vla-bound",
+            "-rdynamic",
         },
         .language = .cpp,
     });

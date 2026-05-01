@@ -89,6 +89,7 @@ fptr coerce(
     symbol sym,
     item_type *to
 ) {
+  // println("coercing {item_type} to {item_type}", sym.type[0], to[0]);
   var_ srct = sym.type[0];
   var_ dstt = to[0];
   u8 *src_ptr = 0;
@@ -97,23 +98,21 @@ fptr coerce(
         src_ptr = (u8 *)mList_arr(stack) + val;
       }),
       case (sym_type, _, {
-        src_ptr = (u8 *)sym.type;
-      }),
-      default(assertMessage(false, "casting non-value");)
-  );
-
-  usize ds = type_size(to);
-  usize ss = type_size(sym.type);
-
-  tu_match(
-      dstt,
-      case (item_type_type, _, {
         tu_match(
-            srct,
+            dstt,
             case (item_type_type, _, return slice_alloc(allocator, u8, 1);),
             default(return nullFptr;)
         );
       }),
+      default(assertMessage(false, "casting non-value");)
+  );
+
+  usize ds = type_size(&dstt);
+
+  usize ss = type_size(&srct);
+
+  tu_match(
+      dstt,
       case (item_type_uint, dst_uint, {
         tu_match(
             srct,
@@ -179,24 +178,23 @@ fptr coerce(
 #define assertprint(bool, fmt, ...) assertMessage(bool, "%s", snprint(stdAlloc, fmt, __VA_ARGS__).ptr)
 fptr checkLiteral(astNode *node, char *message) {
   assertprint(node->op == builtin_NONE, "not a literal : {slice(c8)} : {cstr}", node->text, message);
-  assertprint(!(node->args), "litral has args: {astNode} : {cstr}", node, message);
+  assertprint(!(node->args), "literal has args: {astNode} : {cstr}", node, message);
   var_ res = node->text;
   assertprint(res.len && res.ptr, "not a literal : {slice(c8)} : {cstr}", node->text, message);
   return res;
 }
-msList(astNode *) checkList(astNode *node) {
-  assertMessage(node->op == builtin_NONE);
-  assertMessage(!(node->text.len));
-  assertMessage(node->args);
+msList(astNode *) checkList(astNode *node, char *message) {
+  assertprint(node->op == builtin_NONE, "not a literal : {astNode} {cstr}", node, message);
+  assertprint(node->args, "not a literal : {astNode} {cstr}", node, message);
   return node->args;
 }
 symbol interpret(
     mList(u8) stack,
     mList(usize) stack_frames,
     astNode *node,
-    mList(msHmap(symbol)) symbols,
-    mList(msList(u8)) call_stack // -_- // packed item_type and their types // usize first
+    mList(msHmap(symbol)) symbols
 ) {
+  println("interpreting {astNode}", node);
   defer {
     // assertMessage(
     //     !(mList_len(stack) % 8),
@@ -254,7 +252,7 @@ symbol interpret(
     case builtin_PTR: {
       assertMessage(node->args && msList_len(node->args) == 1);
       AllocatorV tscope = msHmap_allocator(mList_last(symbols));
-      var_ typesym = interpret(stack, stack_frames, node->args[0], symbols, call_stack);
+      var_ typesym = interpret(stack, stack_frames, node->args[0], symbols);
       assertMessage(SYM_IS(type, typesym.kind));
       return (symbol){
           .type = make_type(ITYPE_OF(((item_type_ptr){0, typesym.type}))),
@@ -267,9 +265,9 @@ symbol interpret(
       //
     case builtin_BLOCK: {
       assertMessage(node->args && msList_len(node->args) == 3);
-      var_ arglist_node = checkList(node->args[0]);
+      var_ arglist_node = checkList(node->args[0], "parsing arglist");
       var_ rtype_node = node->args[1];
-      var_ opslist_node = checkList(node->args[2]);
+      var_ opslist_node = checkList(node->args[2], "parsing opslist");
       var_ typeslist =
           msList_init(
               type_allocator,
@@ -277,13 +275,13 @@ symbol interpret(
               msList_len(arglist_node)
           );
       foreach (var_ type, vla(*msList_vla(arglist_node))) {
-        var_ sym = interpret(stack, stack_frames, type, symbols, call_stack);
+        var_ sym = interpret(stack, stack_frames, type, symbols);
         assertMessage(SYM_IS(type, sym.kind));
         var_ ttype = sym.type;
         msList_push(type_allocator, typeslist, ttype);
       }
       {
-        var_ sym = interpret(stack, stack_frames, rtype_node, symbols, call_stack);
+        var_ sym = interpret(stack, stack_frames, rtype_node, symbols);
         assertMessage(SYM_IS(type, sym.kind));
         var_ type = sym.type;
         msList_push(type_allocator, typeslist, type);
@@ -296,8 +294,8 @@ symbol interpret(
     } break;
     case builtin_CALL: {
       assertMessage(node->args && msList_len(node->args) == 2);
-      var_ function = interpret(stack, stack_frames, node->args[0], symbols, call_stack);
-      var_ argslist = checkList(node->args[1]);
+      var_ function = interpret(stack, stack_frames, node->args[0], symbols);
+      var_ argslist = checkList(node->args[1], "called argslist");
 
       var_ function_ops = tu_assert(sym_function, function.kind);
       var_ function_typ = tu_assert(item_type_block, function.type[0]);
@@ -305,6 +303,7 @@ symbol interpret(
       /*
        * returned item
        * -- new stack frame --
+       *  usize args_len
        */
       var_ return_type = msList_last(function_typ.types);
       usize return_type_size;
@@ -319,18 +318,101 @@ symbol interpret(
       while (mList_len(stack) % 8)
         mList_push(stack, 0);
 
-      mList_push(stack_frames, mList_len(stack));
+      var_ old_stack_allocator = msHmap_allocator(mList_last(symbols));
+      var_ new_stack_allocator = arena_new_ext(old_stack_allocator, 1024);
+      mList_push(symbols, msHmap_init(new_stack_allocator, symbol));
+      defer { arena_cleanup(msHmap_allocator(mList_pop(symbols))); };
+      usize next_frame = mList_len(stack);
+
+      usize call_len = msList_len(function_typ.types) - 1;
+      var_ s = aCreate(new_stack_allocator, symbol, call_len);
+      for (usize i = 0; i < call_len; i++) {
+        s[i] = interpret(stack, stack_frames, argslist[i], symbols);
+        if (!item_type_equal(s[i].type, function_typ.types[i])) {
+          var_ to = coerce(new_stack_allocator, stack, s[i], function_typ.types[i]);
+          assertprint(to.ptr && to.ptr, "failed to coerce type {item_type} to {item_type}", s[i].type[0], function_typ.types[i][0]);
+          s[i] = (symbol){
+              .type = function_typ.types[i],
+              .kind = SYM_OF(mList_len(stack)),
+          };
+          mList_pushArr(stack, *VLAP(to.ptr, to.len));
+        };
+      }
+
+      mList_push(stack_frames, next_frame);
       defer { mList_len(stack) = mList_pop(stack_frames); };
 
-      var_ listAllocator = ((List *)call_stack)->allocator;
-      mList_push(call_stack, msList_init(listAllocator, u8));
-      defer {
-        msList_deInit(listAllocator, mList_last(call_stack));
-        mList_pop(call_stack);
-      };
+      mList_pushArr(stack, *VLAP((u8 *)&call_len, sizeof(usize)));
+      for (usize i = 0; i < call_len; i++) {
+        usize ts = 0;
+        tu_match(
+            s[i].type[0],
+            case (item_type_type, _, ts = 0;),
+            default(ts = type_size(s[i].type);)
+        );
+        mList_pushArr(stack, *VLAP((u8 *)s[i].type, sizeof(s[i].type[0])));
+        mList_pushArr(stack, *VLAP((u8 *)s[i].kind.sym_value, ts));
+      }
+
+      msHmap(usize) label_to_line = msHmap_init(new_stack_allocator, usize);
+      for (usize i = 0; i < msList_len(function_ops); i++) {
+        var_ it =
+            function_ops[i];
+        switch (it->op) {
+          case builtin_LABEL: {
+            assertprint(false, "unimplemented");
+          } break;
+          case builtin_JMP_IF:
+          case builtin_JMP: {
+            assertprint(false, "unimplemented");
+          } break;
+          case builtin_RETURN: {
+            // var_ res =
+          } break;
+          default:
+            interpret(stack, stack_frames, it, symbols);
+        }
+      }
 
     } break;
     case builtin_ARG: {
+      usize len = *(usize *)(mList_arr(stack) + mList_last(stack_frames));
+      var_ litn = checkLiteral(node->args[0], "args item");
+      assertprint(fptr_to_number(litn), "arg requires a number");
+      var_ n = fptr_to_number(litn);
+      assertprint(n < len, "arg index out of bounds");
+
+      usize i = 0;
+      usize ts = 0;
+      u8 *place = (mList_arr(stack) + mList_last(stack_frames) + sizeof(usize));
+
+      while (i < n) {
+        item_type t = *(typeof(t) *)place;
+        tu_match(
+            t,
+            // case (item_type_block, _, ts = 0;), // ?
+            case (item_type_type, _, ts = 0;),
+            default(ts = type_size(&t);)
+        );
+        place += ts;
+      }
+      var_ it = (item_type *)place;
+      usize idx = (usize)(it - (item_type *)mList_arr(stack));
+      tu_match(
+          it[0],
+          case (item_type_type, _,
+                return (symbol){
+                    .type = it,
+                    .kind = SYM_OF((sym_type){})
+                };),
+          default(
+              return (symbol){
+                  .type = it,
+                  .kind = SYM_OF((sym_value){idx})
+              };
+          ),
+
+      );
 
     } break;
 
@@ -347,7 +429,7 @@ symbol interpret(
       msHmap_set(
           mList_last(symbols),
           name,
-          interpret(stack, stack_frames, item, symbols, call_stack)
+          interpret(stack, stack_frames, item, symbols)
       );
       return *msHmap_get(mList_last(symbols), name);
     } break;
@@ -419,7 +501,7 @@ int main(void) {
         stack,
         stack_frames,
         node,
-        symbols, NULL
+        symbols
     );
 
   println("arena capacity : {}", arena_totalMem(symArena));
