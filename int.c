@@ -4,6 +4,7 @@
 #include "wheels/mytypes.h"
 #include "wheels/tagged_unions.h"
 #include <assert.h>
+#include <locale.h>
 #include <stdbool.h>
 
 #include "sexp_parser.c"
@@ -189,7 +190,6 @@ msList(astNode *) checkList(astNode *node) {
   assertMessage(node->args);
   return node->args;
 }
-
 symbol interpret(
     mList(u8) stack,
     mList(usize) stack_frames,
@@ -419,7 +419,7 @@ int main(void) {
         stack,
         stack_frames,
         node,
-        symbols
+        symbols, NULL
     );
 
   println("arena capacity : {}", arena_totalMem(symArena));
