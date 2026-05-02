@@ -245,6 +245,13 @@ symbol pull_arg(
   symbol *frame_symbols = (symbol *)(mList_arr(stack) + frame_start);
   return frame_symbols[idx];
 }
+symbol ffi_call(
+    mList(u8) stack,
+    mList(usize) stack_frames,
+    item_type_block callType,
+    mList(msHmap(symbol)) symbols
+) {
+}
 symbol interpret(
     mList(u8) stack,
     mList(usize) stack_frames,
@@ -712,7 +719,6 @@ symbol interpret(
 //
 //
 
-// responsible for writing to the return adress
 // TODO ffi
 
 fptr read_stdin(AllocatorV allocator) {
