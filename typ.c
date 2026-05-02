@@ -4,7 +4,6 @@
 #include "wheels/mytypes.h"
 #include "wheels/print.h"
 #include "wheels/sList.h"
-#include "wheels/tagged_unions.h"
 #include "wheels/tu_macros.h"
 // TODO move off asserts
 #pragma push_macro("max")
@@ -12,48 +11,10 @@
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 
-static usize type_size(item_type *t);
-static usize type_alignment(item_type *t);
+static usize item_type_size(item_type *t);
+static usize item_type_alignment(item_type *t);
 
-static usize type_alignment(item_type *t) {
-  item_type ts = *t;
-  usize res = 0;
-  tu_match(
-      ts,
-      case (item_type_struct /**/, $in, { res = $in.alignment; }),
-      case (item_type_union /* */, $in, { res = $in.alignment; }),
-      case (item_type_sint /*  */, $in, { res = $in.alignment; }),
-      case (item_type_uint /*  */, $in, { res = $in.alignment; }),
-      case (item_type_ptr /*   */, $in, { res = $in.alignment; }),
-      case (item_type_block /* */, $in, { assertMessage(false, "alignof of function"); }),
-      case (item_type_type /*  */, $in, { assertMessage(false, "alignof of type type"); }),
-      default({
-        assertMessage(
-            false, "unhandled type : %s", snprint(stdAlloc, "{}", t->tag).ptr
-        );
-      })
-  );
-
-  if (res)
-    return res;
-  tu_match(
-      ts,
-      case (item_type_struct, $in, {
-        usize max_align = 1;
-        foreach (var_ t, vla(*msList_vla($in.types)))
-          max_align = max(max_align, type_alignment(t.type));
-        return max_align;
-      }),
-      case (item_type_union, $in, {
-        usize max_align = 1;
-        foreach (var_ t, vla(*msList_vla($in.types)))
-          max_align = max(max_align, type_alignment(t));
-        return max_align;
-      }),
-      default(return min(type_size(t), 8);),
-  );
-}
-static usize type_size(item_type *t) {
+static usize item_type_size(item_type *t) {
   item_type ts = *t;
   tu_match(
       ts,
@@ -61,19 +22,16 @@ static usize type_size(item_type *t) {
         usize len = msList_len($in.types);
         if (!len)
           return 0;
-
         var_ lastitem = $in.types[len - 1];
-        usize size = lastitem.offset + type_size(lastitem.type);
-
-        usize align = type_alignment(t);
+        usize size = lastitem.offset + item_type_size(lastitem.type);
+        usize align = item_type_alignment(t);
         return lineup(size, align);
       }),
       case (item_type_union, $in, {
         usize max_size = 0;
         foreach (var_ t_ptr, vla(*msList_vla($in.types)))
-          max_size = max(max_size, type_size(t_ptr));
-
-        usize align = type_alignment(t);
+          max_size = max(max_size, item_type_size(t_ptr));
+        usize align = item_type_alignment(t);
         return lineup(max_size, align);
       }),
       case (item_type_sint, $in, {
@@ -84,6 +42,9 @@ static usize type_size(item_type *t) {
       }),
       case (item_type_ptr, _, {
         return sizeof(void *);
+      }),
+      case (item_type_array, $in, {
+        return item_type_size($in.type) * $in.count;
       }),
       case (item_type_block, _, {
         assertMessage(false, "size of function");
@@ -96,6 +57,44 @@ static usize type_size(item_type *t) {
   assertMessage(false, "unreachable");
   return 0;
 }
+
+static usize item_type_alignment(item_type *t) {
+  item_type ts = *t;
+  tu_match(
+      ts,
+      case (item_type_struct, $in, {
+        return $in.alignment;
+      }),
+      case (item_type_union, $in, {
+        usize max_align = 1;
+        foreach (var_ t_ptr, vla(*msList_vla($in.types)))
+          max_align = max(max_align, item_type_alignment(t_ptr));
+        return max_align;
+      }),
+      case (item_type_sint, $in, {
+        return lineup($in.bitwidth, 8) / 8;
+      }),
+      case (item_type_uint, $in, {
+        return lineup($in.bitwidth, 8) / 8;
+      }),
+      case (item_type_ptr, _, {
+        return sizeof(void *);
+      }),
+      case (item_type_array, $in, {
+        return item_type_alignment($in.type);
+      }),
+      case (item_type_block, _, {
+        assertMessage(false, "alignment of function");
+      }),
+      case (item_type_type, _, {
+        assertMessage(false, "alignment of type type");
+      }),
+      default(assertMessage(false, "unhandled type : %s", snprint(stdAlloc, "{}", (usize)t->tag).ptr);)
+  );
+  assertMessage(false, "unreachable");
+  return 0;
+}
+
 bool item_type_equal(item_type *a, item_type *b) {
   if (a->tag != b->tag)
     return false;
@@ -103,6 +102,13 @@ bool item_type_equal(item_type *a, item_type *b) {
   switch (a->tag) {
     case TU_TAG(item_type_type): {
       return true;
+    } break;
+    case TU_TAG(item_type_array): {
+      return item_type_equal(
+                 a->item_type_array.type,
+                 b->item_type_array.type
+             ) &&
+             a->item_type_array.count == b->item_type_array.count;
     } break;
     case TU_TAG(item_type_ptr): {
       return item_type_equal(
@@ -117,7 +123,7 @@ bool item_type_equal(item_type *a, item_type *b) {
     } break;
     case TU_TAG(item_type_uint): {
       return ( // TODO idk about alignment
-          a->item_type_sint.bitwidth == b->item_type_sint.bitwidth
+          a->item_type_uint.bitwidth == b->item_type_uint.bitwidth
       );
     } break;
     case TU_TAG(item_type_struct): {
@@ -183,7 +189,7 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type, {
       case (item_type_ptr, $in, {
         PUTS("*{");
         if ($in.type)
-          USENAMEDPRINTER("item_type", $in.type);
+          USENAMEDPRINTER("item_type", $in.type[0]);
         PUTS("}");
       }),
       case (item_type_struct, $in, {
@@ -197,7 +203,7 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type, {
             USETYPEPRINTER(usize, $in.types[i].offset);
             PUTS("]:");
             if ($in.types[i].type)
-              USENAMEDPRINTER("item_type", $in.types[i].type);
+              USENAMEDPRINTER("item_type", $in.types[i].type[0]);
           }
         }
         PUTS(" }");
@@ -210,7 +216,7 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type, {
             if (i > 0)
               PUTS(", ");
             if ($in.types[i])
-              USENAMEDPRINTER("item_type", $in.types[i]);
+              USENAMEDPRINTER("item_type", $in.types[i][0]);
           }
         }
         PUTS(" }");
@@ -222,10 +228,10 @@ REGISTER_SPECIAL_PRINTER("item_type", item_type, {
           if (i)
             PUTS(",");
           if ($in.types[i])
-            USENAMEDPRINTER("item_type", ($in.types[i]));
+            USENAMEDPRINTER("item_type", ($in.types[i][0]));
         }
         PUTS(")");
-        USENAMEDPRINTER("item_type", $in.types[msList_len($in.types) - 1]);
+        USENAMEDPRINTER("item_type", $in.types[msList_len($in.types) - 1][0]);
         PUTS("}");
       }),
       default(PUTS("unknown");)

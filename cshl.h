@@ -1,4 +1,3 @@
-#include <stdcountof.h>
 #if !defined(CSHL_H)
   #define CSHL_H (1)
   #include "wheels/fptr.h"
@@ -23,7 +22,6 @@
     UNION,/*union of ... types       (type...)*/\
     PTR,/*pointer to type            (type)   */\
     TYPE,/*type of type              ()       */\
-    TYPEOF,/*type of type                     */
 
   #define STRUCT_OPERATIONS\
     ELEMPTR,
@@ -107,6 +105,7 @@ tu_def(
     (item_type, u8),
     (item_type_type /*  */, struct {}),
     (item_type_ptr /*   */, struct { u32 alignment; item_type* type ; }),
+    (item_type_array /* */, struct { u32 alignment; u32 count; item_type* type ; }),
     (item_type_sint /*  */, struct { u32 alignment; u32 bitwidth; }),
     (item_type_uint /*  */, struct { u32 alignment; u32 bitwidth; }),
     (item_type_struct /**/, struct { u32 alignment; struct { item_type *type; usize offset; } *types; }),
@@ -118,7 +117,7 @@ tu_def(
     (symKind, u8),
     (sym_none /*    */, struct {}),
     (sym_type /*    */, struct {}),
-    (sym_value /*  */, usize),
+    (sym_value /*   */, usize),
     (sym_function /**/, msList(astNode *)),
     (sym_extern /*  */, item_type_block *),
 );
