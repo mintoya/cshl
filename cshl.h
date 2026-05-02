@@ -54,17 +54,17 @@
     RETURN,\
     ARG,/*nth arg of current fn (n)*/\
     BLOCK, /*       ((...),t,(...))*/\
-    EXTERN,/*       ((...),t,(...))*/\
+    EXTERN,/*ffi*/\
     CALL,  /*  a = b(c) CALL(a,b,c)*/\
+    JMP,   /* goto(a)         (a)  */\
+    JMP_IF,/* if(a) goto(b)   (a,b)*/\
+    LABEL, /* create label    (b)  */\
 
   #define MISC_OPERATIONS\
     NONE,  /*symbol is none , none with args is list*/\
     DECL,  /* t s             (s,t)*/\
     SET,   /* s = v           (s,v)*/\
-    INIT,  /* typeof(v) s = v (s,v)*/\
-    JMP,   /* goto(a)         (a)  */\
-    JMP_IF,/* if(a) goto(b)   (a,b)*/\
-    LABEL, /* create label    (b)  */
+    INIT,  /* typeof(v) s = v (s,v)*/
 
 // clang-format on
 

@@ -40,7 +40,7 @@ item_type *get_ptr_iType(item_type *t) {
         assertMessage(
             false,
             "tried to get inner pointer to %s",
-            snprint(stdAlloc, "{item_type}", t[0]).ptr
+            snprint(stdAlloc, " {item_type}", t[0]).ptr
         );
       })
   );
@@ -274,6 +274,26 @@ symbol interpret(
       //
 
     case builtin_NONE: {
+      if (fptr_is_number(node->text)) {
+        usize val = fptr_to_number(node->text);
+
+        while (mList_len(stack) % sizeof(usize))
+          mList_push(stack, 0);
+
+        usize addr = mList_len(stack);
+
+        u8 *val_ptr = (u8 *)&val;
+        for (usize i = 0; i < sizeof(usize); i++) {
+          mList_push(stack, val_ptr[i]);
+        }
+
+        return (symbol){
+            .type = make_type(ITYPE_OF(((item_type_uint){0, 64}))),
+            .kind = SYM_OF((sym_value){addr})
+        };
+      }
+
+      // 2. If it's not a number, proceed with normal symbol lookup
       var_ s = symbolResolve(symbols, checkLiteral(node, "resolving symbol"));
       assertMessage(
           s,
@@ -282,6 +302,7 @@ symbol interpret(
       );
       return *s;
     } break;
+
       //
       // types
       //
@@ -356,7 +377,7 @@ symbol interpret(
 
       item_type type_val = ITYPE_OF(((item_type_struct){
           .alignment = (u32)max_align,
-          .types = members // msList of {type, offset}
+          .types = members
       }));
 
       return (symbol){
@@ -432,9 +453,12 @@ symbol interpret(
 
       usize call_len = msList_len(function_typ.types) - 1;
 
-      var_ s = slice_alloc(new_stack_allocator, symbol, call_len);
-      foreach (var_ i, span(0, s.len))
-        s.ptr[i] = interpret(stack, stack_frames, argslist[i], symbols);
+      slice(symbol) s = {};
+      if (call_len) {
+        s = slice_alloc(new_stack_allocator, symbol, call_len);
+        foreach (var_ i, span(0, s.len))
+          s.ptr[i] = interpret(stack, stack_frames, argslist[i], symbols);
+      }
 
       mList_push(stack_frames, next_frame);
       defer { mList_len(stack) = mList_pop(stack_frames); };
@@ -443,7 +467,6 @@ symbol interpret(
 
       msHmap(usize) label_to_line = msHmap_init(new_stack_allocator, usize);
 
-      // Pre-pass to map forward labels
       for (usize i = 0; i < msList_len(function_ops); i++) {
         if (function_ops[i]->op == builtin_LABEL) {
           assertMessage(function_ops[i]->args && msList_len(function_ops[i]->args) == 1);
@@ -553,7 +576,121 @@ symbol interpret(
       );
       return *msHmap_get(mList_last(symbols), name);
     } break;
+
+    case builtin_DECL: {
+      assertMessage(node->args && msList_len(node->args) == 2);
+
+      var_ name = checkLiteral(node->args[0], "DECL name");
+      var_ type_sym = interpret(stack, stack_frames, node->args[1], symbols);
+
+      assertprint(SYM_IS(type, type_sym.kind), "DECL requires a type as its second argument");
+
+      usize align = item_type_alignment(type_sym.type);
+      usize size = item_type_size(type_sym.type);
+
+      // Align stack for the new variable
+      while (mList_len(stack) % align)
+        mList_push(stack, 0);
+
+      usize addr = mList_len(stack);
+
+      // Allocate zeroed space for the variable
+      for (usize i = 0; i < size; i++)
+        mList_push(stack, 0);
+
+      // Create the symbol pointing to our newly allocated stack memory
+      symbol local_sym = (symbol){
+          .type = type_sym.type,
+          .kind = SYM_OF((sym_value){addr})
+      };
+
+      msHmap_set(mList_last(symbols), name, local_sym);
+      return local_sym;
+    } break;
+
       //
+      // logic
+      //
+      //
+      // Pointers & Mutation
+      //
+
+    case builtin_REF: {
+      assertMessage(node->args && msList_len(node->args) == 1);
+      var_ target = interpret(stack, stack_frames, node->args[0], symbols);
+
+      // We can only take the address of something that physically exists on the stack
+      assertprint(SYM_IS(value, target.kind), "REF target must be an l-value");
+
+      // Create the pointer type
+      item_type *ptr_type = make_type(ITYPE_OF(((item_type_ptr){
+          .alignment = sizeof(usize),
+          .type = target.type
+      })));
+
+      // Allocate space on the stack for the pointer itself (a usize holding an offset)
+      while (mList_len(stack) % sizeof(usize))
+        mList_push(stack, 0);
+
+      usize ptr_addr = mList_len(stack);
+
+      for (usize i = 0; i < sizeof(usize); i++)
+        mList_push(stack, 0);
+
+      // Write the target's stack offset into our new pointer
+      memcpy(mList_arr(stack) + ptr_addr, &target.kind.sym_value, sizeof(usize));
+
+      return (symbol){
+          .type = ptr_type,
+          .kind = SYM_OF((sym_value){ptr_addr})
+      };
+    } break;
+
+    case builtin_CP: {
+      assertMessage(node->args && msList_len(node->args) == 2);
+      var_ dst_ptr = interpret(stack, stack_frames, node->args[0], symbols);
+      var_ src_ptr = interpret(stack, stack_frames, node->args[1], symbols);
+
+      assertprint(SYM_IS(value, dst_ptr.kind), "CP dst must be a value");
+      assertprint(SYM_IS(value, src_ptr.kind), "CP src must be a value");
+
+      // Extract inner types to know how many bytes to copy
+      item_type *dst_inner = get_ptr_iType(dst_ptr.type);
+      item_type *src_inner = get_ptr_iType(src_ptr.type);
+
+      // Optional: assert item_type_equal(dst_inner, src_inner);
+
+      usize dst_addr;
+      usize src_addr;
+
+      // Read the actual stack offsets stored inside the pointers
+      memcpy(&dst_addr, mList_arr(stack) + dst_ptr.kind.sym_value, sizeof(usize));
+      memcpy(&src_addr, mList_arr(stack) + src_ptr.kind.sym_value, sizeof(usize));
+
+      usize copy_size = item_type_size(dst_inner);
+
+      // Execute *dst = *src
+      memcpy(mList_arr(stack) + dst_addr, mList_arr(stack) + src_addr, copy_size);
+
+      return dst_ptr;
+    } break;
+
+    case builtin_SET: {
+      assertMessage(node->args && msList_len(node->args) == 2);
+      var_ dst_sym = interpret(stack, stack_frames, node->args[0], symbols);
+      var_ src_sym = interpret(stack, stack_frames, node->args[1], symbols);
+
+      assertprint(SYM_IS(value, dst_sym.kind), "SET dst must be an l-value");
+      assertprint(SYM_IS(value, src_sym.kind), "SET src must be a value");
+
+      usize copy_size = item_type_size(dst_sym.type);
+
+      // Standard local assignment: a = b
+      memcpy(mList_arr(stack) + dst_sym.kind.sym_value, mList_arr(stack) + src_sym.kind.sym_value, copy_size);
+
+      return dst_sym;
+    } break;
+
     default:
       assertMessage(
           false,
@@ -629,6 +766,7 @@ int main(void) {
 
   println("arena capacity : {}", arena_totalMem(symArena));
   println("stack size : {} , stack capacity : {}", mList_len(stack), mList_cap(stack));
+  println("{}", ((fptr){sizeof(*mList_vla(stack)), mList_arr(stack)}));
   println("types : ");
   foreach (var_ v, iter(mHmap_iterator(tmap, item_type))) {
     println("{ item_type }", *v->val);
