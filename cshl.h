@@ -1,4 +1,3 @@
-#include <BaseTsd.h>
 #if !defined(CSHL_H)
   #define CSHL_H (1)
   #include "wheels/fptr.h"
@@ -247,9 +246,6 @@ REGISTER_PRINTER(item_type, {
       default(PUTS("unknown");)
   );
 });
-REGISTER_SPECIAL_PRINTER("item_type*", item_type *, {
-  USETYPEPRINTER(item_type, in[0]);
-});
 REGISTER_SPECIAL_PRINTER("astNode*", astNode *, {
   args = printer_arg_trim(args);
   bool usenumbers = false;
@@ -287,6 +283,10 @@ REGISTER_SPECIAL_PRINTER("astNode*", astNode *, {
   } else {
     USENAMEDPRINTER("slice(c8)", in->text);
   }
+});
+
+REGISTER_SPECIAL_PRINTER("item_type*", item_type *, {
+  USETYPEPRINTER(item_type, in[0]);
 });
 
 #endif

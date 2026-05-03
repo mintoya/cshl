@@ -5,7 +5,6 @@
 #include <assert.h>
 #include <locale.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "sexp_parser.c"
@@ -20,21 +19,19 @@ struct bbs_result {
 struct bbs_result bbsearch(
     const void *key,
     const void *base0,
-    size_t nmemb,
-    size_t size,
+    usize nmemb,
+    usize size,
     int (*compar)(const void *, const void *)
 ) {
   typedef typeof(bbsearch(nullptr, nullptr, 0, 0, nullptr)) r_t;
   const char *base = (const char *)base0;
-  int lim, cmp;
-  const void *p;
 
-  for (lim = nmemb; lim; lim >>= 1) {
-    p = base + (lim >> 1) * size;
-    cmp = (*compar)(key, p);
+  for (usize lim = nmemb; lim; lim >>= 1) {
+    var_ p = base + (lim >> 1) * size;
+    var_ cmp = compar(key, p);
     if (cmp == 0)
       return (r_t){(void *)p, 1};
-    if (cmp > 0) { /* key > p: move right */
+    if (cmp > 0) {
       base = (const char *)p + size;
       lim--;
     }
@@ -51,25 +48,12 @@ AllocatorV type_allocator = NULL;
 mHmap(item_type, item_type *) tmap = NULL;
 
 int c_tl(const void *a, const void *b) {
-  var_ al = (msList(item_type *))a;
-  var_ bl = (msList(item_type *))b;
-  var_ all = msList_len(al);
-  var_ bll = msList_len(bl);
-  if (all != bll) {
-    if (all < bll)
-      return -1;
-    else
-      return 1;
-  }
-  var_ ca = fptr_hash(((fptr){sizeof(*msList_vla(al)), (u8 *)al}));
-  var_ cb = fptr_hash(((fptr){sizeof(*msList_vla(al)), (u8 *)bl}));
-  if (ca != cb) {
-    if (ca < cb)
-      return -1;
-    else
-      return 1;
-  }
-  return 0;
+  assertMessage(a && b);
+  var_ al = *(msList(usize) *)a;
+  var_ bl = *(msList(usize) *)b;
+  var_ ca = ((fptr){sizeof(*msList_vla(al)), (u8 *)al});
+  var_ cb = ((fptr){sizeof(*msList_vla(bl)), (u8 *)bl});
+  return fptr_cmp(ca, cb);
 }
 
 #define msList_clone(allocator, list) ({               \
@@ -80,30 +64,52 @@ int c_tl(const void *a, const void *b) {
 msList(item_type *) cache_typeList(msList(item_type *) types) {
   static msList(msList(item_type *)) listList = nullptr;
   listList = listList ?: msList_init(type_allocator, typeof(*listList), 100);
-  var_ f = bbsearch(types, listList, msList_len(listList), sizeof(*listList), c_tl);
-  if (!f.f)
-    msList_ins(type_allocator, listList, (msList(item_type *))f.p - (msList(item_type *))listList, msList_clone(type_allocator, types));
-  return (msList(item_type *))f.p;
+  var_ f = bbsearch(&types, listList, msList_len(listList), sizeof(*listList), c_tl);
+  // println("cache {cstr} for { msList : item_type* }", (f.f ? "hit" : "miss"), types);
+  if (!f.f) {
+    usize place = (msList(item_type *) *)f.p - (msList(item_type *) *)listList;
+    msList_ins(type_allocator, listList, place, msList_clone(type_allocator, types));
+    f = bbsearch(&types, listList, msList_len(listList), sizeof(*listList), c_tl);
+    assertMessage(f.f);
+  }
+  return *(msList(item_type *) *)f.p;
 }
-msList(usize) cache_offsetList(msList(usize) types) {
-  static msList(msList(usize)) listList = nullptr;
+msList(uptr) cache_offsetList(msList(uptr) types) {
+  static msList(msList(uptr)) listList = nullptr;
   listList = listList ?: msList_init(type_allocator, typeof(*listList), 100);
-  var_ f = bbsearch(types, listList, msList_len(listList), sizeof(*listList), c_tl);
-  if (!f.f)
-    msList_ins(type_allocator, listList, (msList(item_type *))f.p - (msList(item_type *))listList, msList_clone(type_allocator, types));
-  return (msList(usize))f.p;
+  var_ f = bbsearch(&types, listList, msList_len(listList), sizeof(*listList), c_tl);
+  // println("cache {cstr} for { msList : usize }", (f.f ? "hit" : "miss"), types);
+  if (!f.f) {
+    uptr place = (msList(uptr) *)f.p - (msList(uptr) *)listList;
+    msList_ins(type_allocator, listList, place, msList_clone(type_allocator, types));
+    f = bbsearch(&types, listList, msList_len(listList), sizeof(*listList), c_tl);
+    assertMessage(f.f);
+  }
+  return *(msList(uptr) *)f.p;
 }
-item_type *make_type(item_type t) {
+item_type *make_type(item_type t0) {
+  item_type t = {};
+  t.tag = t0.tag;
+  TU_MATCH(t0) {
+    TU_OF(item_type_type, k) { t.item_type_type = k; }
+    TU_OF(item_type_ptr, k) { t.item_type_ptr = k; }
+    TU_OF(item_type_array, k) { t.item_type_array = k; }
+    TU_OF(item_type_sint, k) { t.item_type_sint = k; }
+    TU_OF(item_type_uint, k) { t.item_type_uint = k; }
+    TU_OF(item_type_struct, k) { t.item_type_struct = k; }
+    TU_OF(item_type_union, k) { t.item_type_union = k; }
+    TU_OF(item_type_block, k) { t.item_type_block = k; }
+  }
   TU_MATCH(t) {
     TU_OF(item_type_struct, s) {
-      s.types = cache_typeList(s.types);
-      s.offsets = cache_offsetList(s.offsets);
+      t.item_type_struct.types = cache_typeList(s.types);
+      t.item_type_struct.offsets = cache_offsetList(s.offsets);
     }
     TU_OF(item_type_union, s) {
-      s.types = cache_typeList(s.types);
+      t.item_type_union.types = cache_typeList(s.types);
     }
     TU_OF(item_type_block, s) {
-      s.types = cache_typeList(s.types);
+      t.item_type_block.types = cache_typeList(s.types);
     }
   }
   tmap = tmap ?: mHmap_init(type_allocator, item_type, item_type *);
@@ -436,26 +442,23 @@ symbol interpret(
       assertMessage(node->args && msList_len(node->args) >= 0); // allow empty struct
       usize member_count = msList_len(node->args);
 
-      // var_ members = msList_init(
-      //     type_allocator,
-      //     typeof(*(((item_type_struct *)NULL)->types)),
-      //     member_count
-      // );
       struct {
         msList(usize) offsets;
         msList(item_type *) types;
       } members = {
           .types = msList_init(
-              type_allocator,
+              stdAlloc,
               item_type *,
               member_count
           ),
           .offsets = msList_init(
-              type_allocator,
+              stdAlloc,
               usize,
               member_count
           )
       };
+      defer { msList_deInit(stdAlloc, members.types); };
+      defer { msList_deInit(stdAlloc, members.offsets); };
 
       usize current_offset = 0;
       usize max_align = 1;
@@ -501,12 +504,12 @@ symbol interpret(
       var_ arglist_node = checkList(node->args[0], "parsing arglist");
       var_ rtype_node = node->args[1];
       var_ opslist_node = checkList(node->args[2], "parsing opslist");
-      var_ typeslist =
-          msList_init(
-              type_allocator,
-              item_type *,
-              msList_len(arglist_node)
-          );
+      var_ typeslist = msList_init(
+          stdAlloc,
+          item_type *,
+          msList_len(arglist_node)
+      );
+      defer { msList_deInit(stdAlloc, typeslist); };
       foreach (var_ type, vla(*msList_vla(arglist_node))) {
         var_ sym = interpret(stack, stack_frames, type, symbols);
         assertMessage(SYM_IS(type, sym.kind));
@@ -839,6 +842,10 @@ fptr read_stdin(AllocatorV allocator) {
 int main(void) {
   var_ stin = read_stdin(stdAlloc);
   defer { slice_free(stdAlloc, stin); };
+  //   const char sti[] = {
+  // #embed "example.sexp"
+  //   };
+  // var_ stin = fp(sti);
 
   AllocatorV astArena = arena_new_ext(stdAlloc, 1024);
   defer { arena_cleanup(astArena); };
