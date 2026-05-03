@@ -21,9 +21,8 @@ static usize item_type_size(item_type *t) {
       case (item_type_struct, $in, {
         usize len = msList_len($in.types);
         if (!len)
-          return 0;
-        var_ lastitem = $in.types[len - 1];
-        usize size = lastitem.offset + item_type_size(lastitem.type);
+          return 1;
+        usize size = msList_last($in.offsets) + item_type_size(msList_last($in.types));
         usize align = item_type_alignment(t);
         return lineup(size, align);
       }),
@@ -127,16 +126,18 @@ bool item_type_equal(item_type *a, item_type *b) {
       );
     } break;
     case TU_TAG(item_type_struct): {
-      var_ alist = a->item_type_struct.types;
-      var_ blist = b->item_type_struct.types;
-      usize la = msList_len(alist);
-      usize lb = msList_len(blist);
+      var_ atlist = a->item_type_struct.types;
+      var_ btlist = b->item_type_struct.types;
+      var_ aolist = a->item_type_struct.offsets;
+      var_ bolist = b->item_type_struct.offsets;
+      usize la = msList_len(atlist);
+      usize lb = msList_len(btlist);
       if (la != lb)
         return false;
       foreach (var_ i, range(0, la)) {
-        if (alist[i].offset != blist[i].offset)
+        if (aolist[i] != bolist[i])
           return false;
-        if (!item_type_equal(alist[i].type, blist[i].type))
+        if (!item_type_equal(atlist[i], btlist[i]))
           return false;
       }
       return true;
@@ -169,71 +170,3 @@ bool item_type_equal(item_type *a, item_type *b) {
 }
 #pragma pop_macro("max")
 #pragma pop_macro("min")
-REGISTER_SPECIAL_PRINTER("item_type", item_type, {
-  item_type ts = in;
-  tu_match(
-      ts,
-      case (item_type_type, $in, {
-        PUTS("type");
-      }),
-      case (item_type_sint, $in, {
-        PUTS("i{");
-        USETYPEPRINTER(usize, $in.bitwidth);
-        PUTS("}");
-      }),
-      case (item_type_uint, $in, {
-        PUTS("u{");
-        USETYPEPRINTER(usize, $in.bitwidth);
-        PUTS("}");
-      }),
-      case (item_type_ptr, $in, {
-        PUTS("*{");
-        if ($in.type)
-          USENAMEDPRINTER("item_type", $in.type[0]);
-        PUTS("}");
-      }),
-      case (item_type_struct, $in, {
-        PUTS("struct{ ");
-        usize len = msList_len($in.types);
-        if (len) {
-          for (usize i = 0; i < len; i++) {
-            if (i > 0)
-              PUTS(", ");
-            PUTS("[");
-            USETYPEPRINTER(usize, $in.types[i].offset);
-            PUTS("]:");
-            if ($in.types[i].type)
-              USENAMEDPRINTER("item_type", $in.types[i].type[0]);
-          }
-        }
-        PUTS(" }");
-      }),
-      case (item_type_union, $in, {
-        PUTS("union{ ");
-        usize len = msList_len($in.types);
-        if (len) {
-          for (usize i = 0; i < len; i++) {
-            if (i > 0)
-              PUTS(", ");
-            if ($in.types[i])
-              USENAMEDPRINTER("item_type", $in.types[i][0]);
-          }
-        }
-        PUTS(" }");
-      }),
-      case (item_type_block, $in, {
-        PUTS("block{");
-        PUTS("(");
-        foreach (usize i, range(0, msList_len($in.types) - 1)) {
-          if (i)
-            PUTS(",");
-          if ($in.types[i])
-            USENAMEDPRINTER("item_type", ($in.types[i][0]));
-        }
-        PUTS(")");
-        USENAMEDPRINTER("item_type", $in.types[msList_len($in.types) - 1][0]);
-        PUTS("}");
-      }),
-      default(PUTS("unknown");)
-  );
-});

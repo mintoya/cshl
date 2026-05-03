@@ -1,3 +1,4 @@
+#include <BaseTsd.h>
 #if !defined(CSHL_H)
   #define CSHL_H (1)
   #include "wheels/fptr.h"
@@ -21,6 +22,7 @@
     PSTRUCT,/*packed version                  */\
     UNION,/*union of ... types       (type...)*/\
     PTR,/*pointer to type            (type)   */\
+    ARRAY,/*arr of type              (type)   */\
     TYPE,/*type of type              ()       */\
 
   #define STRUCT_OPERATIONS\
@@ -104,13 +106,14 @@ typedef struct item_type item_type;
 tu_def(
     (item_type, u8),
     (item_type_type /*  */, struct {}),
-    (item_type_ptr /*   */, struct { u32 alignment; item_type* type ; }),
-    (item_type_array /* */, struct { u32 alignment; u32 count; item_type* type ; }),
-    (item_type_sint /*  */, struct { u32 alignment; u32 bitwidth; }),
-    (item_type_uint /*  */, struct { u32 alignment; u32 bitwidth; }),
-    (item_type_struct /**/, struct { u32 alignment; struct { item_type *type; usize offset; } *types; }),
-    (item_type_union /* */, struct { u32 alignment; item_type **types; }),
-    (item_type_block /* */, struct { item_type **types; }),
+    (item_type_ptr /*   */, struct {u32 alignment ;item_type*type; }),
+    (item_type_array /* */, struct {u32 alignment ;u32(count);item_type*type; }),
+    (item_type_sint /*  */, struct {u32 alignment ;u32(bitwidth); }),
+    (item_type_uint /*  */, struct {u32 alignment ;u32(bitwidth); }),
+    // list types
+    (item_type_struct /**/, struct {u32 alignment ;msList(item_type*)types;msList(usize) offsets; }),
+    (item_type_union /* */, struct {u32 alignment ;msList(item_type*)types; }),
+    (item_type_block /* */, struct { msList(item_type *) types; }),
 );
 typedef struct symbol symbol;
 tu_def(
@@ -157,18 +160,18 @@ REGISTER_PRINTER(symbol, {
   PUTS("{");
   tu_match(
       in.kind,
-      case (sym_value, x, /*  */ { PUTS("value"); }),
-      case (sym_function, x, /**/ { PUTS("function"); }),
-      case (sym_extern, x, /*  */ { PUTS("extern"); }),
-      case (sym_type, x, /*    */ { PUTS("type"); }),
-      case (sym_none, x, /*    */ { PUTS("none"); }),
+      case (sym_value, /*   */ _, { PUTS("value"); }),
+      case (sym_function, /**/ _, { PUTS("function"); }),
+      case (sym_extern, /*  */ _, { PUTS("extern"); }),
+      case (sym_type, /*    */ _, { PUTS("type"); }),
+      case (sym_none, /*    */ _, { PUTS("none"); }),
   );
   PUTS(",type : ");
   if (in.type) {
     USENAMEDPRINTER("item_type", in.type);
-  } else {
+  } else
     PUTS("none");
-  }
+
   PUTS("}");
 });
 REGISTER_PRINTER(builtin_OP, {
@@ -176,7 +179,75 @@ REGISTER_PRINTER(builtin_OP, {
   var_ v = in < countof(builtins) ? builtins[in] : "unknown";
   USENAMEDPRINTER("cstr", v);
 })
-REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
+REGISTER_PRINTER(item_type, {
+  item_type ts = in;
+  tu_match(
+      ts,
+      case (item_type_type, $in, {
+        PUTS("type");
+      }),
+      case (item_type_sint, $in, {
+        PUTS("i{");
+        USETYPEPRINTER(usize, $in.bitwidth);
+        PUTS("}");
+      }),
+      case (item_type_uint, $in, {
+        PUTS("u{");
+        USETYPEPRINTER(usize, $in.bitwidth);
+        PUTS("}");
+      }),
+      case (item_type_ptr, $in, {
+        PUTS("*{");
+        if ($in.type)
+          USENAMEDPRINTER("item_type", $in.type[0]);
+        PUTS("}");
+      }),
+      case (item_type_struct, $in, {
+        PUTS("s{");
+        usize len = msList_len($in.types);
+        if (len) {
+          for (usize i = 0; i < len; i++) {
+            if (i > 0)
+              PUTS(",");
+            PUTS("[");
+            USETYPEPRINTER(usize, $in.offsets[i]);
+            PUTS("]:");
+            if ($in.types[i])
+              USENAMEDPRINTER("item_type", $in.types[i][0]);
+          }
+        }
+        PUTS("}");
+      }),
+      case (item_type_union, $in, {
+        PUTS("u{");
+        usize len = msList_len($in.types);
+        if (len) {
+          for (usize i = 0; i < len; i++) {
+            if (i > 0)
+              PUTS(",");
+            if ($in.types[i])
+              USENAMEDPRINTER("item_type", $in.types[i][0]);
+          }
+        }
+        PUTS("}");
+      }),
+      case (item_type_block, $in, {
+        PUTS("fn{");
+        PUTS("(");
+        foreach (usize i, range(0, msList_len($in.types) - 1)) {
+          if (i)
+            PUTS(",");
+          if ($in.types[i])
+            USENAMEDPRINTER("item_type", ($in.types[i][0]));
+        }
+        PUTS(")");
+        USENAMEDPRINTER("item_type", $in.types[msList_len($in.types) - 1][0]);
+        PUTS("}");
+      }),
+      default(PUTS("unknown");)
+  );
+});
+REGISTER_SPECIAL_PRINTER("astNode*", astNode *, {
   args = printer_arg_trim(args);
   bool usenumbers = false;
 
@@ -198,7 +269,7 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
       for (usize i = 0; i < msList_len(in->args); i++) {
         if (i > 0)
           PUTS(", ");
-        USENAMEDPRINTER_WA("astNode", args, in->args[i]);
+        USENAMEDPRINTER_WA("astNode*", args, in->args[i]);
       }
     }
     PUTS(")");
@@ -207,7 +278,7 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
     for (usize i = 0; i < msList_len(in->args); i++) {
       if (i > 0)
         PUTS(", ");
-      USENAMEDPRINTER_WA("astNode", args, in->args[i]);
+      USENAMEDPRINTER_WA("astNode*", args, in->args[i]);
     }
     PUTS(")");
   } else {
@@ -215,5 +286,4 @@ REGISTER_SPECIAL_PRINTER("astNode", astNode *, {
   }
 });
 
-  #undef X
 #endif

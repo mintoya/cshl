@@ -20,7 +20,7 @@ AllocatorV type_allocator = NULL;
 mHmap(item_type, item_type *) tmap = NULL;
 item_type *make_type(item_type t) {
   tmap = tmap ?: mHmap_init(type_allocator, item_type, item_type *);
-  return *mHmapGetOrSet(
+  return *mHmap_GetOrSet(
       tmap, t, ({
         var_ rp = aCreate(type_allocator, item_type);
         *rp = t;
@@ -179,14 +179,14 @@ fptr coerce(
 #define assertprint(bool, fmt, ...) assertMessage(bool, "%s", snprint(stdAlloc, fmt, __VA_ARGS__).ptr)
 fptr checkLiteral(astNode *node, char *message) {
   assertprint(node->op == builtin_NONE, "not a literal : {slice(c8)} : {cstr}", node->text, message);
-  assertprint(!(node->args), "literal has args: {astNode} : {cstr}", node, message);
+  assertprint(!(node->args), "literal has args: {astNode*} : {cstr}", node, message);
   var_ res = node->text;
   assertprint(res.len && res.ptr, "not a literal : {slice(c8)} : {cstr}", node->text, message);
   return res;
 }
 msList(astNode *) checkList(astNode *node, char *message) {
-  assertprint(node->op == builtin_NONE, "not a literal : {astNode} {cstr}", node, message);
-  assertprint(node->args, "not a literal : {astNode} {cstr}", node, message);
+  assertprint(node->op == builtin_NONE, "not a literal : {astNode*} {cstr}", node, message);
+  assertprint(node->args, "not a literal : {astNode*} {cstr}", node, message);
   return node->args;
 }
 sliceDef(symbol);
@@ -349,11 +349,26 @@ symbol interpret(
       assertMessage(node->args && msList_len(node->args) >= 0); // allow empty struct
       usize member_count = msList_len(node->args);
 
-      var_ members = msList_init(
-          type_allocator,
-          typeof(*(((item_type_struct *)NULL)->types)),
-          member_count
-      );
+      // var_ members = msList_init(
+      //     type_allocator,
+      //     typeof(*(((item_type_struct *)NULL)->types)),
+      //     member_count
+      // );
+      struct {
+        msList(usize) offsets;
+        msList(item_type *) types;
+      } members = {
+          .types = msList_init(
+              type_allocator,
+              item_type *,
+              member_count
+          ),
+          .offsets = msList_init(
+              type_allocator,
+              usize,
+              member_count
+          )
+      };
 
       usize current_offset = 0;
       usize max_align = 1;
@@ -370,11 +385,8 @@ symbol interpret(
         usize offset = lineup(current_offset, align);
 
         // println("struct : {item_type}", member_type[0]);
-        msList_push(
-            type_allocator,
-            members,
-            ((typeof(*members)){.type = member_type, .offset = offset})
-        );
+        msList_push(type_allocator, members.types, member_type);
+        msList_push(type_allocator, members.offsets, offset);
 
         current_offset = offset + item_type_size(member_type);
       }
@@ -383,7 +395,8 @@ symbol interpret(
 
       item_type type_val = ITYPE_OF(((item_type_struct){
           .alignment = (u32)max_align,
-          .types = members
+          .types = members.types,
+          .offsets = members.offsets
       }));
 
       return (symbol){
@@ -748,8 +761,8 @@ int main(void) {
   type_allocator = arena_new_ext(stdAlloc, 1024);
   defer { arena_cleanup(type_allocator); };
 
-  println("{msList : astNode : numbers}", list);
-  println("{msList : astNode}", list);
+  println("{msList : astNode* : numbers}", list);
+  println("{msList : astNode*}", list);
 
   var_ stack = mList_init(stdAlloc, u8);
   defer { mList_deInit(stack); };

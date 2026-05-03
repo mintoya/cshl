@@ -25,3 +25,8 @@
     (RETURN a))))
 
 (INIT result (CALL main ())) ; result remains  on the stack
+
+(INIT i8_s      (CALL slice     (i8)))
+(INIT i8_s_s    (CALL slice   (i8_s)))
+(INIT i8_s_s_s  (CALL slice (i8_s_s)))
+(INIT i8_s_s_s2 (CALL slice (i8_s_s)))
