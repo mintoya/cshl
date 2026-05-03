@@ -2,7 +2,6 @@
 #include "wheels/fptr.h"
 #include "wheels/macros.h"
 #include "wheels/mytypes.h"
-#include "wheels/tagged_unions.h"
 #include <assert.h>
 #include <locale.h>
 #include <stdbool.h>
@@ -589,30 +588,30 @@ symbol interpret(
 
       var_ name = checkLiteral(node->args[0], "DECL name");
       var_ type_sym = interpret(stack, stack_frames, node->args[1], symbols);
-
       assertprint(SYM_IS(type, type_sym.kind), "DECL requires a type as its second argument");
+      tu_match(
+          type_sym.type[0],
+          case (item_type_type, _, {
+            assertprint(false, "type type not supported for decl");
+          }),
+          default({
+            usize align = item_type_alignment(type_sym.type);
+            usize size = item_type_size(type_sym.type);
 
-      usize align = item_type_alignment(type_sym.type);
-      usize size = item_type_size(type_sym.type);
+            usize addr = mList_len(stack);
 
-      // Align stack for the new variable
-      while (mList_len(stack) % align)
-        mList_push(stack, 0);
+            mList_pushArr(stack, *VLAP((u8 *)NULL, size));
 
-      usize addr = mList_len(stack);
+            symbol local_sym = (symbol){
+                .type = type_sym.type,
+                .kind = SYM_OF((sym_value){addr})
+            };
 
-      // Allocate zeroed space for the variable
-      for (usize i = 0; i < size; i++)
-        mList_push(stack, 0);
+            msHmap_set(mList_last(symbols), name, local_sym);
+            return local_sym;
+          }),
+      );
 
-      // Create the symbol pointing to our newly allocated stack memory
-      symbol local_sym = (symbol){
-          .type = type_sym.type,
-          .kind = SYM_OF((sym_value){addr})
-      };
-
-      msHmap_set(mList_last(symbols), name, local_sym);
-      return local_sym;
     } break;
 
       //
