@@ -5,11 +5,42 @@
 #include <assert.h>
 #include <locale.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "sexp_parser.c"
 #include "typ.c"
+#include "wheels/omap.h"
 #include "wheels/tu_macros.h"
+
+struct bbs_result {
+  void *p;
+  bool f;
+};
+struct bbs_result bbsearch(
+    const void *key,
+    const void *base0,
+    size_t nmemb,
+    size_t size,
+    int (*compar)(const void *, const void *)
+) {
+  typedef typeof(bbsearch(nullptr, nullptr, 0, 0, nullptr)) r_t;
+  const char *base = (const char *)base0;
+  int lim, cmp;
+  const void *p;
+
+  for (lim = nmemb; lim; lim >>= 1) {
+    p = base + (lim >> 1) * size;
+    cmp = (*compar)(key, p);
+    if (cmp == 0)
+      return (r_t){(void *)p, 1};
+    if (cmp > 0) { /* key > p: move right */
+      base = (const char *)p + size;
+      lim--;
+    }
+  }
+  return (r_t){(void *)base, 0};
+}
 
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
@@ -18,7 +49,63 @@ static_assert(!(sizeof(symbol) % sizeof(usize)));
 AllocatorV type_allocator = NULL;
 
 mHmap(item_type, item_type *) tmap = NULL;
+
+int c_tl(const void *a, const void *b) {
+  var_ al = (msList(item_type *))a;
+  var_ bl = (msList(item_type *))b;
+  var_ all = msList_len(al);
+  var_ bll = msList_len(bl);
+  if (all != bll) {
+    if (all < bll)
+      return -1;
+    else
+      return 1;
+  }
+  var_ ca = fptr_hash(((fptr){sizeof(*msList_vla(al)), (u8 *)al}));
+  var_ cb = fptr_hash(((fptr){sizeof(*msList_vla(al)), (u8 *)bl}));
+  if (ca != cb) {
+    if (ca < cb)
+      return -1;
+    else
+      return 1;
+  }
+  return 0;
+}
+
+#define msList_clone(allocator, list) ({               \
+  var_ res = msList_init(allocator, typeof(*list));    \
+  msList_pushArr(allocator, res, (*msList_vla(list))); \
+  res;                                                 \
+})
+msList(item_type *) cache_typeList(msList(item_type *) types) {
+  static msList(msList(item_type *)) listList = nullptr;
+  listList = listList ?: msList_init(type_allocator, typeof(*listList), 100);
+  var_ f = bbsearch(types, listList, msList_len(listList), sizeof(*listList), c_tl);
+  if (!f.f)
+    msList_ins(type_allocator, listList, (msList(item_type *))f.p - (msList(item_type *))listList, msList_clone(type_allocator, types));
+  return (msList(item_type *))f.p;
+}
+msList(usize) cache_offsetList(msList(usize) types) {
+  static msList(msList(usize)) listList = nullptr;
+  listList = listList ?: msList_init(type_allocator, typeof(*listList), 100);
+  var_ f = bbsearch(types, listList, msList_len(listList), sizeof(*listList), c_tl);
+  if (!f.f)
+    msList_ins(type_allocator, listList, (msList(item_type *))f.p - (msList(item_type *))listList, msList_clone(type_allocator, types));
+  return (msList(usize))f.p;
+}
 item_type *make_type(item_type t) {
+  TU_MATCH(t) {
+    TU_OF(item_type_struct, s) {
+      s.types = cache_typeList(s.types);
+      s.offsets = cache_offsetList(s.offsets);
+    }
+    TU_OF(item_type_union, s) {
+      s.types = cache_typeList(s.types);
+    }
+    TU_OF(item_type_block, s) {
+      s.types = cache_typeList(s.types);
+    }
+  }
   tmap = tmap ?: mHmap_init(type_allocator, item_type, item_type *);
   return *mHmap_GetOrSet(
       tmap, t, ({

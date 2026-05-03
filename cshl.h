@@ -247,6 +247,9 @@ REGISTER_PRINTER(item_type, {
       default(PUTS("unknown");)
   );
 });
+REGISTER_SPECIAL_PRINTER("item_type*", item_type *, {
+  USETYPEPRINTER(item_type, in[0]);
+});
 REGISTER_SPECIAL_PRINTER("astNode*", astNode *, {
   args = printer_arg_trim(args);
   bool usenumbers = false;
