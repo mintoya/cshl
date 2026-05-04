@@ -1,6 +1,5 @@
 ; symbol that is an alias for the type type 
 (INIT type (TYPE))
-
 (INIT i8    (SINT 8))
 (INIT i16   (SINT 16))
 (INIT i32   (SINT 32))
@@ -36,10 +35,27 @@
 (INIT i8_s (CALL slice (i8)))
 
 (DECL r1 u8)
-(DECL r2 u8)
 
 (CALL r1 main ())
 
-(CALL r2
+(INIT r2 (CALL 
   (BLOCK () u64 (
-  (RETURN 12))) ())
+  (DECL i u64)
+  (DECL g u64)
+  (DECL cnd u8)
+
+  (SET g 10)
+
+  (LABEL start)
+  (EQUAL cnd i 10)
+  (JMP_IF end cnd)
+
+
+  (ADD i i 1)
+  (JMP start)
+
+  (LABEL end)
+  (RETURN i))) ()))
+
+; (EXTERN putchar ( i32 ) i32 )
+

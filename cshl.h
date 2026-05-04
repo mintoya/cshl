@@ -183,7 +183,7 @@ REGISTER_PRINTER(item_type, {
   tu_match(
       ts,
       case (item_type_type, $in, {
-        PUTS("type");
+        PUTS("T");
       }),
       case (item_type_sint, $in, {
         PUTS("i{");

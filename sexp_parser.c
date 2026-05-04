@@ -1,13 +1,14 @@
 #include "cshl.h"
+#include "wheels/macros.h"
 
 static const char *sexp_op_names[] = {APPLY_N(OP_NAME, OPERATIONS)};
-static const usize sexp_op_count = countof(sexp_op_names);
+// countof(sexp_op_names);
 
 static msHmap(builtin_OP) sexp_build_op_table(AllocatorV allocator) {
   msHmap(builtin_OP) table = msHmap_init(allocator, builtin_OP);
-  for (usize i = 0; i < sexp_op_count; i++) {
+  foreach (var_ v, ipairs(i, sexp_op_names)) {
     builtin_OP op = (builtin_OP)i;
-    msHmap_set(table, sexp_op_names[i], op);
+    msHmap_set(table, v, op);
   }
   return table;
 }
@@ -131,37 +132,11 @@ msList(astNode *) sexp_parse_file(AllocatorV allocator, fptr src) {
   usize line = 1;
 
   while ((i = sexp_skip(src, i, &line)) < src.len) {
-    sexp_assert(allocator, src.ptr[i] != ')', src, i, line, "unexpected {char*}", ")");
+    sexp_assert(allocator, src.ptr[i] != ')', src, i, line, "unexpected )");
     usize next;
     astNode *child;
 
-    if (src.ptr[i] == '\'') {
-      astNode *quote_list = aCreate(allocator, astNode, 1);
-      quote_list->op = builtin_NONE;
-      quote_list->text = (fptr){0, src.ptr + i};
-      quote_list->args = msList_init(allocator, astNode *);
-
-      astNode *quote_atom = aCreate(allocator, astNode, 1);
-      quote_atom->op = builtin_NONE;
-      quote_atom->text = (fptr){.ptr = src.ptr + i, .len = 1};
-      quote_atom->args = NULL;
-
-      msList_push(allocator, quote_list->args, quote_atom);
-
-      i++;
-      i = sexp_skip(src, i, &line);
-      sexp_assert(allocator, i < src.len, src, i, line, "unexpected EOF after quote");
-
-      astNode *quoted_child;
-      if (src.ptr[i] == '(') {
-        quoted_child = sexp_parse_list(allocator, ops, src, i, &next, &line);
-      } else {
-        quoted_child = sexp_parse_atom(allocator, src, i, &next, line);
-      }
-      msList_push(allocator, quote_list->args, quoted_child);
-
-      child = quote_list;
-    } else if (src.ptr[i] == '(') {
+    if (src.ptr[i] == '(') {
       child = sexp_parse_list(allocator, ops, src, i, &next, &line);
     } else {
       child = sexp_parse_atom(allocator, src, i, &next, line);

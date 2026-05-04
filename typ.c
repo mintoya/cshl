@@ -5,6 +5,7 @@
 #include "wheels/print.h"
 #include "wheels/sList.h"
 #include "wheels/tu_macros.h"
+#include <string.h>
 // TODO move off asserts
 #pragma push_macro("max")
 #pragma push_macro("min")
@@ -97,6 +98,8 @@ static usize item_type_alignment(item_type *t) {
 bool item_type_equal(item_type *a, item_type *b) {
   if (a->tag != b->tag)
     return false;
+  if (!memcmp(a, b, sizeof(*a)))
+    return true;
 
   switch (a->tag) {
     case TU_TAG(item_type_type): {
@@ -116,12 +119,12 @@ bool item_type_equal(item_type *a, item_type *b) {
       );
     } break;
     case TU_TAG(item_type_sint): {
-      return ( // TODO idk about alignment
+      return (
           a->item_type_sint.bitwidth == b->item_type_sint.bitwidth
       );
     } break;
     case TU_TAG(item_type_uint): {
-      return ( // TODO idk about alignment
+      return (
           a->item_type_uint.bitwidth == b->item_type_uint.bitwidth
       );
     } break;

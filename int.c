@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <locale.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "sexp_parser.c"
@@ -13,8 +14,17 @@
 #include "wheels/sList.h"
 #include "wheels/tu_macros.h"
 
-#define max(a, b) ({ var_ _a  = a ; var_ _b = b;(((_a) > (_b)) ? (_a) : (_b)); })
-#define min(a, b) ({ var_ _a  = a ; var_ _b = b;(((_a) < (_b)) ? (_a) : (_b)); })
+#define max(a, b) ({             \
+  var_ _a = a;                   \
+  var_ _b = b;                   \
+  (((_a) > (_b)) ? (_a) : (_b)); \
+})
+#define min(a, b) ({             \
+  var_ _a = a;                   \
+  var_ _b = b;                   \
+  (((_a) < (_b)) ? (_a) : (_b)); \
+})
+
 static_assert(!(sizeof(symbol) % sizeof(usize)));
 
 AllocatorV type_allocator = NULL;
@@ -124,11 +134,11 @@ usize get_int_bitwidth(item_type *t) {
       })
   );
 }
-bool isDigit(u8 u) { return !(u > '9' || u < '0'); }
+bool is_digit(u8 u) { return !(u > '9' || u < '0'); }
 usize fptr_to_number(fptr f) {
   usize res = 0;
   foreach (u8 *c, span(f.ptr, f.len)) {
-    if (!isDigit(*c))
+    if (!is_digit(*c))
       break;
     res *= 10;
     res += *c - '0';
@@ -136,8 +146,10 @@ usize fptr_to_number(fptr f) {
   return res;
 }
 bool fptr_is_number(fptr f) {
+  if (!f.len)
+    return false;
   foreach (u8 *c, span(f.ptr, f.len))
-    if (!isDigit(*c))
+    if (!is_digit(*c))
       return false;
   return true;
 }
@@ -460,8 +472,11 @@ symbol interpret(
     if (keep_len.keep) {
       mList_len(stack) = keep_len.current_length;
     } else
+      // ;
       while (mList_len(stack) % 8)
         mList_push(stack, 0);
+
+    println("{}", ((fptr){sizeof(*mList_vla(stack)), mList_arr(stack)}));
   };
   switch (node->op) {
 
@@ -470,32 +485,25 @@ symbol interpret(
       //
 
     case builtin_NONE: {
-      if (fptr_is_number(node->text)) {
-        usize val = fptr_to_number(node->text);
+      fptr f = checkLiteral(node, "leaf literal");
+      if (fptr_is_number(f)) {
 
+        usize val = fptr_to_number(f);
         while (mList_len(stack) % sizeof(usize))
           mList_push(stack, 0);
 
         usize addr = mList_len(stack);
 
-        u8 *val_ptr = (u8 *)&val;
-        for (usize i = 0; i < sizeof(usize); i++) {
-          mList_push(stack, val_ptr[i]);
-        }
+        mList_pushArr(stack, *VLAP((u8 *)&val, sizeof(val)));
 
         return (symbol){
-            .type = make_type(ITYPE_OF(((item_type_uint){0, 64}))),
+            .type = make_type(ITYPE_OF(((item_type_uint){0, sizeof(usize) * 8}))),
             .kind = SYM_OF((sym_value){addr})
         };
       }
 
-      // 2. If it's not a number, proceed with normal symbol lookup
-      var_ s = symbolResolve(symbols, checkLiteral(node, "resolving symbol"));
-      assertMessage(
-          s,
-          "%s",
-          snprint(stdAlloc, "unknown symbol : {slice(c8)}", node->text).ptr
-      );
+      var_ s = symbolResolve(symbols, f);
+      assertprint(s, "unknown symbol : {slice(c8)}", f);
       return *s;
     } break;
 
@@ -657,7 +665,6 @@ symbol interpret(
       var_ rhs = node->args[1];
 
       if (rhs->op == builtin_CALL) {
-        // CALL has 2 args here — INIT synthesizes the dst
         assertMessage(rhs->args && msList_len(rhs->args) == 2);
         var_ function = interpret(stack, stack_frames, rhs->args[0], symbols);
         var_ function_typ = tu_assert(item_type_block, function.type[0]);
@@ -685,12 +692,12 @@ symbol interpret(
         symbol result = interpret_call(dst, function, argslist, stack, stack_frames, symbols);
         msHmap_set(mList_last(symbols), name, result);
         return result;
+      } else {
+        var_ result = interpret(stack, stack_frames, rhs, symbols);
+        msHmap_set(mList_last(symbols), name, result);
+        return *msHmap_get(mList_last(symbols), name);
       }
 
-      // non-CALL: evaluate and store directly
-      var_ result = interpret(stack, stack_frames, rhs, symbols);
-      msHmap_set(mList_last(symbols), name, result);
-      return *msHmap_get(mList_last(symbols), name);
     } break;
     case builtin_DECL: {
       assertMessage(node->args && msList_len(node->args) == 2);
@@ -883,35 +890,195 @@ symbol interpret(
       assertMessage(node->args && msList_len(node->args) == 3);
 
       var_ dst = interpret(stack, stack_frames, node->args[0], symbols);
-
       var_ srca = interpret(stack, stack_frames, node->args[1], symbols);
       var_ srcb = interpret(stack, stack_frames, node->args[2], symbols);
-      assertMessage(item_type_equal(srca.type, srcb.type));
+
+      AllocatorV alloc = msHmap_allocator(mList_last(symbols));
+      var_ coerced_b = coerce(alloc, stack, srcb, srca.type);
+      assertprint(coerced_b.ptr, "failed to coerce srcb to srca type");
 
       var_ dst_v = tu_assert(sym_value, dst.kind);
       var_ srca_v = tu_assert(sym_value, srca.kind);
-      var_ srcb_v = tu_assert(sym_value, srcb.kind);
 
-      tu_match(
-          dst.type[0],
-          case (item_type_uint, _, {}),
-          case (item_type_sint, _, {}),
-          default({ assertprint(false, "not result can only be an integer"); }),
-      );
-      var_ d = (u8 *)(dst_v + mList_arr(stack));
       var_ dst_size = item_type_size(dst.type);
-
       var_ src_size = item_type_size(srca.type);
 
+      var_ d = (u8 *)(dst_v + mList_arr(stack));
       memset(d, 0, dst_size);
       d[0] = memcmp(
-                 mList_arr(stack) + srcb_v,
                  mList_arr(stack) + srca_v,
+                 coerced_b.ptr,
                  src_size
              ) == 0;
       return dst;
     } break;
 
+    case builtin_MORE:
+    case builtin_LESS: {
+      assertMessage(node->args && msList_len(node->args) == 3);
+
+      var_ dst = interpret(stack, stack_frames, node->args[0], symbols);
+      var_ srca = interpret(stack, stack_frames, node->args[1], symbols);
+      var_ srcb = interpret(stack, stack_frames, node->args[2], symbols);
+
+      AllocatorV alloc = msHmap_allocator(mList_last(symbols));
+      var_ coerced_b = coerce(alloc, stack, srcb, srca.type);
+      assertprint(coerced_b.ptr, "failed to coerce srcb to srca type");
+
+      var_ dst_v = tu_assert(sym_value, dst.kind);
+      var_ srca_v = tu_assert(sym_value, srca.kind);
+
+      var_ dst_size = item_type_size(dst.type);
+      var_ src_size = item_type_size(srca.type);
+
+      bool is_signed = false;
+      tu_match(
+          srca.type[0],
+          case (item_type_uint, _, { is_signed = false; }),
+          case (item_type_sint, _, { is_signed = true; }),
+          case (item_type_ptr, _, { is_signed = false; }),
+          default({ assertprint(false, "comparison requires integers or pointers"); }),
+      );
+
+      var_ d = (u8 *)(dst_v + mList_arr(stack));
+      memset(d, 0, dst_size);
+
+#define DO_CMP(type_cast, op) \
+  d[0] = (*((type_cast *)(mList_arr(stack) + srca_v)) op * ((type_cast *)(coerced_b.ptr)))
+
+      if (node->op == builtin_MORE) {
+        if (is_signed) {
+          if (src_size == 1)
+            DO_CMP(i8, >);
+          else if (src_size == 2)
+            DO_CMP(i16, >);
+          else if (src_size == 4)
+            DO_CMP(i32, >);
+          else
+            DO_CMP(i64, >);
+        } else {
+          if (src_size == 1)
+            DO_CMP(u8, >);
+          else if (src_size == 2)
+            DO_CMP(u16, >);
+          else if (src_size == 4)
+            DO_CMP(u32, >);
+          else
+            DO_CMP(u64, >);
+        }
+      } else {
+        if (is_signed) {
+          if (src_size == 1)
+            DO_CMP(i8, <);
+          else if (src_size == 2)
+            DO_CMP(i16, <);
+          else if (src_size == 4)
+            DO_CMP(i32, <);
+          else
+            DO_CMP(i64, <);
+        } else {
+          if (src_size == 1)
+            DO_CMP(u8, <);
+          else if (src_size == 2)
+            DO_CMP(u16, <);
+          else if (src_size == 4)
+            DO_CMP(u32, <);
+          else
+            DO_CMP(u64, <);
+        }
+      }
+#undef DO_CMP
+
+      return dst;
+    } break;
+
+    case builtin_ADD:
+    case builtin_SUB:
+    case builtin_MUL:
+    case builtin_DIV:
+    case builtin_MOD:
+    case builtin_SHR:
+    case builtin_SHL: {
+      assertMessage(node->args && msList_len(node->args) == 3);
+
+      var_ dst = interpret(stack, stack_frames, node->args[0], symbols);
+      var_ srca = interpret(stack, stack_frames, node->args[1], symbols);
+      var_ srcb = interpret(stack, stack_frames, node->args[2], symbols);
+
+      AllocatorV alloc = msHmap_allocator(mList_last(symbols));
+
+      // Coerce both srca and srcb directly to dst.type so everything aligns
+      var_ coerced_a = coerce(alloc, stack, srca, dst.type);
+      var_ coerced_b = coerce(alloc, stack, srcb, dst.type);
+      assertprint(coerced_a.ptr && coerced_b.ptr, "math type coercion failed");
+
+      var_ dst_v = tu_assert(sym_value, dst.kind);
+      var_ size = item_type_size(dst.type);
+
+      bool is_signed = false;
+      tu_match(
+          dst.type[0],
+          case (item_type_uint, _, { is_signed = false; }),
+          case (item_type_sint, _, { is_signed = true; }),
+          case (item_type_ptr, _, { is_signed = false; }),
+          default({ assertprint(false, "math requires integers or pointers"); }),
+      );
+
+#define DO_MATH(type_cast, op) \
+  *((type_cast *)(mList_arr(stack) + dst_v)) = (*((type_cast *)(coerced_a.ptr))op * ((type_cast *)(coerced_b.ptr)))
+
+#define MATH_SWITCH(op) \
+  if (is_signed) {      \
+    if (size == 1)      \
+      DO_MATH(i8, op);  \
+    else if (size == 2) \
+      DO_MATH(i16, op); \
+    else if (size == 4) \
+      DO_MATH(i32, op); \
+    else                \
+      DO_MATH(i64, op); \
+  } else {              \
+    if (size == 1)      \
+      DO_MATH(u8, op);  \
+    else if (size == 2) \
+      DO_MATH(u16, op); \
+    else if (size == 4) \
+      DO_MATH(u32, op); \
+    else                \
+      DO_MATH(u64, op); \
+  }
+
+      switch (node->op) {
+        case builtin_ADD:
+          MATH_SWITCH(+);
+          break;
+        case builtin_SUB:
+          MATH_SWITCH(-);
+          break;
+        case builtin_MUL:
+          MATH_SWITCH(*);
+          break;
+        case builtin_DIV:
+          MATH_SWITCH(/);
+          break;
+        case builtin_MOD:
+          MATH_SWITCH(%);
+          break;
+        case builtin_SHR:
+          MATH_SWITCH(>>);
+          break;
+        case builtin_SHL:
+          MATH_SWITCH(<<);
+          break;
+        default:
+          break;
+      }
+
+#undef MATH_SWITCH
+#undef DO_MATH
+
+      return dst;
+    } break;
     default:
       assertMessage(
           false,
@@ -961,7 +1128,7 @@ int main(void) {
   type_allocator = arena_new_ext(stdAlloc, 1024);
   defer { arena_cleanup(type_allocator); };
 
-  // println("{msList : astNode* : numbers}", list);
+  println("{msList : astNode* : numbers}", list);
   // println("{msList : astNode*}", list);
 
   var_ stack = mList_init(stdAlloc, u8);
@@ -984,9 +1151,8 @@ int main(void) {
 
   println("arena capacity : {}", arena_totalMem(symArena));
   println("stack size : {} , stack capacity : {}", mList_len(stack), mList_cap(stack));
-  println("{}", ((fptr){sizeof(*mList_vla(stack)), mList_arr(stack)}));
-  // println("types : ");
-  // foreach (var_ v, iter(mHmap_iterator(tmap, item_type)))
-  //   println("{ item_type }", *v->val);
+  println("types : ");
+  foreach (var_ v, iter(mHmap_iterator(tmap, item_type)))
+    println("{ item_type }", *v->val);
 }
 #include "wheels/wheels.h"
