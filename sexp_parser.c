@@ -6,7 +6,7 @@ static const char *sexp_op_names[] = {APPLY_N(OP_NAME, OPERATIONS)};
 
 static msHmap(builtin_OP) sexp_build_op_table(AllocatorV allocator) {
   msHmap(builtin_OP) table = msHmap_init(allocator, builtin_OP);
-  foreach (var_ v, ipairs(i, sexp_op_names)) {
+  foreach (var_ v, pair(i, sexp_op_names)) {
     builtin_OP op = (builtin_OP)i;
     msHmap_set(table, v, op);
   }

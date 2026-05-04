@@ -53,13 +53,14 @@
 
   #define FUNCTION_OPERATIONS\
     RETURN,\
-    ARG,/*nth arg of current fn (n)*/\
-    BLOCK, /*       ((...),t,(...))*/\
+    ARG,/*nth arg of current fn    (n)*/\
+    BLOCK, /*          ((...),t,(...))*/\
     EXTERN,/*ffi*/\
-    CALL,  /*  a = b(c) CALL(a,b,c)*/\
-    JMP,   /* goto(a)         (a)  */\
-    JMP_IF,/* if(b) goto(a)   (a,b)*/\
-    LABEL, /* create label    (b)  */\
+    CALL,  /*  a = b(c)    CALL(a,b,c)*/\
+    JMP,   /* goto(a)            (a)  */\
+    JMP_IF,/* if(b) goto(a)      (a,b)*/\
+    LABEL, /* create label       (b)  */\
+    FUNCTION, /*b(*)(a...)    (a...)b */\
 
   #define MISC_OPERATIONS\
     NONE,  /*symbol is none , none with args is list*/\

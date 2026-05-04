@@ -656,7 +656,7 @@ symbol interpret(
     } break;
 
       //
-      // creations
+      // stack
       //
 
     case builtin_INIT: {
@@ -1080,17 +1080,12 @@ symbol interpret(
       return dst;
     } break;
     default:
-      assertMessage(
+      assertprint(
           false,
-          "%s",
-          snprint(
-              stdAlloc,
-              "unimplemented op : {builtin_OP} , text : \"{slice(c8)}\"",
-              node->op, node->text
-          )
-              .ptr
+          "unimplemented op : {builtin_OP} "
+          ", text : \"{slice(c8)}\"",
+          node->op, node->text
       );
-      return (symbol){};
       break;
   }
   assertprint(false, "reached end of interpret without return \nnode :  {astNode}", node);
