@@ -16,12 +16,14 @@
     (RETURN (STRUCT u64 (PTR (ARG 0)))))))
 
 (INIT main 
-  (BLOCK () u64 (
-    (INIT a 42)
-    (INIT b 98)
+  (BLOCK () i32 (
+    (DECL a i32)
+    (DECL b i32)
+    (SET a 42)
+    (SET b 98)
 
-    (DECL ap (PTR u64))
-    (DECL bp (PTR u64))
+    (DECL ap (PTR i32))
+    (DECL bp (PTR i32))
 
     (REF ap a)
     (REF bp b)
@@ -34,8 +36,10 @@
 (INIT i8_s (CALL slice (i8)))
 
 (DECL r1 u8)
-(DECL r2 (UINT 8))
+(DECL r2 u8)
 
 (CALL r1 main ())
-(SET  r2 256)
 
+(CALL r2
+  (BLOCK () u64 (
+  (RETURN 12))) ())

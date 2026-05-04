@@ -255,7 +255,9 @@ msList(astNode *) checkList(astNode *node, char *message) {
   assertprint(node->args, "not a literal : {astNode*} {cstr}", node, message);
   return node->args;
 }
+
 sliceDef(symbol);
+
 void push_args(
     slice(symbol) args,
     mList(u8) stack,
@@ -299,7 +301,6 @@ void push_args(
     mList_push(stack, 0);
   }
 }
-
 symbol pull_arg(
     usize idx,
     mList(u8) stack,
@@ -317,14 +318,12 @@ symbol ffi_call(
     mList(msHmap(symbol)) symbols
 ) {
 }
-
 symbol interpret(
     mList(u8) stack,
     mList(usize) stack_frames,
     astNode *node,
     mList(msHmap(symbol)) symbols
 );
-
 static symbol interpret_call(
     symbol dst,
     symbol function,
@@ -432,7 +431,6 @@ static symbol interpret_call(
   }
   return dst;
 }
-
 symbol interpret(
     mList(u8) stack,
     mList(usize) stack_frames,
@@ -629,7 +627,7 @@ symbol interpret(
     } break;
 
     case builtin_CALL: {
-      assertMessage(node->args && msList_len(node->args) == 3);
+      assertMessage(node->args && msList_len(node->args) == 3, "%i", msList_len(node->args));
       var_ dst = interpret(stack, stack_frames, node->args[0], symbols);
       var_ function = interpret(stack, stack_frames, node->args[1], symbols);
       var_ argslist = checkList(node->args[2], "called argslist");
@@ -790,10 +788,9 @@ symbol interpret(
       if (node->op == builtin_BNOT) {
         assertprint(item_type_equal(dst.type, src.type), "types must be the same");
         var_ s = (u8 *)(src_v + mList_arr(stack));
-        var_ d = (u8 *)(src_v + mList_arr(stack));
-        foreach (var_ i, range(0, item_type_size(dst.type))) {
+        var_ d = (u8 *)(dst_v + mList_arr(stack));
+        foreach (var_ i, range(0, item_type_size(dst.type)))
           d[i] = ~s[i];
-        }
       } else {
         tu_match(
             dst.type[0],
@@ -908,7 +905,7 @@ symbol interpret(
 
       memset(d, 0, dst_size);
       d[0] = memcmp(
-                 mList_arr(stack) + srca_v,
+                 mList_arr(stack) + srcb_v,
                  mList_arr(stack) + srca_v,
                  src_size
              ) == 0;
@@ -931,12 +928,6 @@ symbol interpret(
   }
   assertprint(false, "reached end of interpret without return \nnode :  {astNode}", node);
 }
-
-//
-//
-//
-
-// TODO ffi
 
 fptr read_stdin(AllocatorV allocator) {
   usize size = 0;
