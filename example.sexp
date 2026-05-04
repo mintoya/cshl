@@ -31,7 +31,11 @@
     (RETURN a))))
 
 
-(INIT i8_s   (CALL slice     (i8)))
-(DECL result u8)
-; (INIT result (CALL main ())) ; result remains  on the stack
-(CALL result main ())
+(INIT i8_s (CALL slice (i8)))
+
+(DECL r1 u8)
+(DECL r2 (UINT 8))
+
+(CALL r1 main ())
+(SET  r2 256)
+

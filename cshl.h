@@ -58,7 +58,7 @@
     EXTERN,/*ffi*/\
     CALL,  /*  a = b(c) CALL(a,b,c)*/\
     JMP,   /* goto(a)         (a)  */\
-    JMP_IF,/* if(a) goto(b)   (a,b)*/\
+    JMP_IF,/* if(b) goto(a)   (a,b)*/\
     LABEL, /* create label    (b)  */\
 
   #define MISC_OPERATIONS\
